@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     bq_dataset: str = Field("flowmate", alias="BQ_DATASET")
     bq_tickets_table: str = Field("tickets", alias="BQ_TICKETS_TABLE")
+    bq_pr_reviews_table: str = Field("pr_reviews", alias="BQ_PR_REVIEWS_TABLE")
+    bq_team_velocity_table: str = Field("team_velocity", alias="BQ_TEAM_VELOCITY_TABLE")
 
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     gemini_model: str = Field("gemini-3.6-flash", alias="GEMINI_MODEL")
@@ -26,6 +28,14 @@ class Settings(BaseSettings):
     @property
     def bq_tickets_table_id(self) -> str:
         return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_tickets_table}"
+
+    @property
+    def bq_pr_reviews_table_id(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_pr_reviews_table}"
+
+    @property
+    def bq_team_velocity_table_id(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_team_velocity_table}"
 
 
 @lru_cache

@@ -20,3 +20,9 @@ data/synthetic/*.parquet
 
 .DS_Store
 node_modules/
+
+# Local Claude Code session state
+.claude/
+
+# ADK local runtime session state
+.adk/
