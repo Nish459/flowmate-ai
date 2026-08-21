@@ -1,0 +1,22 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+.envrc
+*.egg-info/
+.idea/
+.vscode/
+
+# Generated synthetic data is reproducible from scripts/generate_synthetic_tickets.py
+data/synthetic/*.csv
+data/synthetic/*.parquet
+!data/synthetic/.gitkeep
+
+# GCP service account keys must never be committed
+*service-account*.json
+*credentials*.json
+*-key.json
+
+.DS_Store
+node_modules/

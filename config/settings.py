@@ -1,0 +1,36 @@
+"""Central configuration for FlowMate, loaded from environment / .env.
+
+Every other module (data generation, BigQuery loading, and later the
+agents/API) should import `settings` from here rather than reading
+os.environ directly, so there is a single source of truth for config.
+"""
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    gcp_project_id: str = Field(..., alias="GCP_PROJECT_ID")
+    gcp_location: str = Field("us-central1", alias="GCP_LOCATION")
+
+    bq_dataset: str = Field("flowmate", alias="BQ_DATASET")
+    bq_tickets_table: str = Field("tickets", alias="BQ_TICKETS_TABLE")
+
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    gemini_model: str = Field("gemini-3.6-flash", alias="GEMINI_MODEL")
+
+    @property
+    def bq_tickets_table_id(self) -> str:
+        return f"{self.gcp_project_id}.{self.bq_dataset}.{self.bq_tickets_table}"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
