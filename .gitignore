@@ -20,9 +20,11 @@ data/synthetic/*.parquet
 
 .DS_Store
 node_modules/
+.pytest_cache/
 
 # Local Claude Code session state
 .claude/
+CLAUDE.md
 
 # ADK local runtime session state
 .adk/
