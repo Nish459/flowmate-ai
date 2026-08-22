@@ -26,5 +26,8 @@ node_modules/
 .claude/
 CLAUDE.md
 
+# Personal learning notes, not project deliverables
+docs/how-it-works.md
+
 # ADK local runtime session state
 .adk/

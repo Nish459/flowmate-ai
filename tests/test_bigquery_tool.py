@@ -52,3 +52,36 @@ def test_snapshot_tools_are_wrapped_as_function_tools():
     assert isinstance(bigquery_tool.tickets_tool, FunctionTool)
     assert isinstance(bigquery_tool.pr_reviews_tool, FunctionTool)
     assert isinstance(bigquery_tool.velocity_tool, FunctionTool)
+    assert isinstance(bigquery_tool.flagged_tickets_tool, FunctionTool)
+
+
+def test_flagged_tickets_sql_covers_all_three_flag_conditions():
+    sql = bigquery_tool._flagged_tickets_sql()
+    assert "INTERVAL 24 HOUR" in sql
+    assert "is_blocked" in sql
+    assert "assigned_to IS NULL" in sql
+    assert "'stale'" in sql
+    assert "'blocked'" in sql
+    assert "'missing_assignee'" in sql
+    # Terminal-state tickets should never be flagged.
+    assert "NOT IN ('Resolved', 'Closed')" in sql
+
+
+def test_flagged_tickets_sql_is_select_only():
+    sql = bigquery_tool._flagged_tickets_sql()
+    assert sql.strip().upper().startswith("SELECT")
+
+
+def test_get_flagged_tickets_runs_the_flagged_sql(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql):
+        captured["sql"] = sql
+        return [{"ticket_id": "TFS-1", "flag_reason": "stale"}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_flagged_tickets()
+
+    assert result == [{"ticket_id": "TFS-1", "flag_reason": "stale"}]
+    assert captured["sql"] == bigquery_tool._flagged_tickets_sql()

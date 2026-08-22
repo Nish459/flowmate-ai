@@ -64,7 +64,40 @@ def get_team_velocity_snapshot() -> list[dict]:
     )
 
 
+def _flagged_tickets_sql() -> str:
+    """SQL for Ticket Watcher: open tickets that are stale (24h+ untouched),
+    blocked, or missing an assignee. Filtering lives in SQL rather than the
+    LLM's reasoning -- date arithmetic should be exact, not inferred.
+    """
+    return f"""
+    SELECT ticket_id, title, team, state, assigned_to, priority, sprint_id,
+           changed_date, is_blocked, blocked_reason,
+           CASE
+             WHEN state NOT IN ('Resolved', 'Closed')
+                  AND changed_date < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+               THEN 'stale'
+             WHEN is_blocked THEN 'blocked'
+             WHEN assigned_to IS NULL AND state NOT IN ('Resolved', 'Closed')
+               THEN 'missing_assignee'
+           END AS flag_reason
+    FROM `{settings.bq_tickets_table_id}`
+    WHERE state NOT IN ('Resolved', 'Closed')
+      AND (
+        changed_date < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+        OR is_blocked
+        OR assigned_to IS NULL
+      )
+    ORDER BY priority ASC, changed_date ASC
+    """
+
+
+def get_flagged_tickets() -> list[dict]:
+    """Return open tickets that are stale (24h+ untouched), blocked, or missing an assignee."""
+    return query_bigquery(_flagged_tickets_sql())
+
+
 tickets_tool = FunctionTool(get_tickets_snapshot)
 pr_reviews_tool = FunctionTool(get_pr_reviews_snapshot)
 velocity_tool = FunctionTool(get_team_velocity_snapshot)
+flagged_tickets_tool = FunctionTool(get_flagged_tickets)
 raw_query_tool = FunctionTool(query_bigquery)
