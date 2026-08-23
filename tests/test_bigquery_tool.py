@@ -13,6 +13,21 @@ def test_query_bigquery_rejects_non_select_case_insensitively():
         bigquery_tool.query_bigquery("update tickets set state = 'Closed'")
 
 
+def test_query_bigquery_allows_with_clause_ctes(monkeypatch):
+    class _FakeQueryJob:
+        def result(self):
+            return []
+
+    class _FakeClient:
+        def query(self, sql, job_config=None):
+            return _FakeQueryJob()
+
+    monkeypatch.setattr(bigquery_tool, "_get_client", lambda: _FakeClient())
+
+    # Should not raise -- a WITH ... SELECT CTE is still read-only.
+    bigquery_tool.query_bigquery("WITH x AS (SELECT 1) SELECT * FROM x")
+
+
 class _FakeRow:
     def __init__(self, data):
         self._data = data
@@ -56,6 +71,10 @@ def test_snapshot_tools_are_wrapped_as_function_tools():
     assert isinstance(bigquery_tool.pending_reviews_tool, FunctionTool)
     assert isinstance(bigquery_tool.activity_tool, FunctionTool)
     assert isinstance(bigquery_tool.upcoming_tickets_tool, FunctionTool)
+    assert isinstance(bigquery_tool.at_risk_tickets_tool, FunctionTool)
+    assert isinstance(bigquery_tool.team_type_close_rates_tool, FunctionTool)
+    assert isinstance(bigquery_tool.reviewer_latency_tool, FunctionTool)
+    assert isinstance(bigquery_tool.bug_close_rate_trend_tool, FunctionTool)
 
 
 def test_flagged_tickets_sql_covers_all_three_flag_conditions():
@@ -188,3 +207,95 @@ def test_get_upcoming_tickets_runs_with_bound_params(monkeypatch):
     assert result == [{"ticket_id": "TFS-2"}]
     assert captured["sql"] == expected_sql
     assert captured["params"] == expected_params
+
+
+def test_open_tickets_at_risk_sql_anchors_to_dataset_max_changed_date():
+    sql = bigquery_tool._open_tickets_at_risk_sql()
+    assert sql.strip().upper().startswith("WITH")
+    assert "MAX(changed_date)" in sql
+    assert "CURRENT_TIMESTAMP" not in sql
+    assert "LEFT JOIN" in sql
+    assert "days_until_sprint_end" in sql
+    assert "NOT IN ('Resolved', 'Closed')" in sql
+
+
+def test_get_open_tickets_at_risk_runs_the_at_risk_sql(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql, params=None):
+        captured["sql"] = sql
+        return [{"ticket_id": "TFS-1", "days_until_sprint_end": 5}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_open_tickets_at_risk()
+
+    assert result == [{"ticket_id": "TFS-1", "days_until_sprint_end": 5}]
+    assert captured["sql"] == bigquery_tool._open_tickets_at_risk_sql()
+
+
+def test_team_type_close_rates_sql_excludes_current_sprint_and_filters_small_groups():
+    sql = bigquery_tool._team_type_close_rates_sql()
+    assert "sprint_end_date < anchor.now_ts" in sql
+    assert "GROUP BY t.team, t.work_item_type" in sql
+    assert "HAVING COUNT(*) >= 5" in sql
+    assert "CURRENT_TIMESTAMP" not in sql
+
+
+def test_get_team_type_close_rates_runs_the_close_rates_sql(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql, params=None):
+        captured["sql"] = sql
+        return [{"team": "DevOps", "work_item_type": "Bug", "close_rate": 0.3}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_team_type_close_rates()
+
+    assert result == [{"team": "DevOps", "work_item_type": "Bug", "close_rate": 0.3}]
+    assert captured["sql"] == bigquery_tool._team_type_close_rates_sql()
+
+
+def test_reviewer_latency_stats_sql_excludes_pending_and_filters_small_groups():
+    sql = bigquery_tool._reviewer_latency_stats_sql()
+    assert "review_status != 'Pending'" in sql
+    assert "GROUP BY reviewer" in sql
+    assert "HAVING COUNT(*) >= 5" in sql
+
+
+def test_get_reviewer_latency_stats_runs_the_latency_sql(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql, params=None):
+        captured["sql"] = sql
+        return [{"reviewer": "Angie Henderson", "avg_latency_hours": 81.6}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_reviewer_latency_stats()
+
+    assert result == [{"reviewer": "Angie Henderson", "avg_latency_hours": 81.6}]
+    assert captured["sql"] == bigquery_tool._reviewer_latency_stats_sql()
+
+
+def test_bug_close_rate_by_sprint_sql_filters_to_bugs_and_orders_chronologically():
+    sql = bigquery_tool._bug_close_rate_by_sprint_sql()
+    assert "work_item_type = 'Bug'" in sql
+    assert "GROUP BY t.sprint_id, s.sprint_end_date" in sql
+    assert "ORDER BY s.sprint_end_date ASC" in sql
+
+
+def test_get_bug_close_rate_by_sprint_runs_the_trend_sql(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql, params=None):
+        captured["sql"] = sql
+        return [{"sprint_id": "SPR-2026-07", "bug_close_rate": 0.38}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_bug_close_rate_by_sprint()
+
+    assert result == [{"sprint_id": "SPR-2026-07", "bug_close_rate": 0.38}]
+    assert captured["sql"] == bigquery_tool._bug_close_rate_by_sprint_sql()

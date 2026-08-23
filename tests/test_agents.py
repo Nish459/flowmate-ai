@@ -14,7 +14,8 @@ def test_each_agent_module_exposes_a_root_agent_with_a_tool():
     for agent in (ticket_watcher, review_nudger, standup_writer, bottleneck_detector):
         assert agent.tools, f"{agent.name} has no tools wired"
 
-    assert len(bottleneck_detector.tools) == 3  # needs all 3 tables per the doc
+    # at-risk candidates + 3 historical signal tools it cross-references them against
+    assert len(bottleneck_detector.tools) == 4
 
 
 def test_orchestrator_wires_fan_out_then_fan_in():

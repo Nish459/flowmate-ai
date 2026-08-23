@@ -32,7 +32,9 @@ def query_bigquery(sql: str, params: list[bigquery.ScalarQueryParameter] | None 
     return the results as a list of row dicts.
 
     Args:
-        sql: A SELECT statement. Only SELECT statements are permitted.
+        sql: A SELECT statement, optionally preceded by a WITH clause of CTEs
+            that themselves only SELECT. Only these read-only forms are
+            permitted.
         params: Optional query parameters for values that originate from an
             LLM tool call argument -- never interpolate those into `sql`
             directly, bind them here instead.
@@ -40,8 +42,9 @@ def query_bigquery(sql: str, params: list[bigquery.ScalarQueryParameter] | None 
     Returns:
         A list of rows, each represented as a dict of column name to value.
     """
-    if not sql.strip().upper().startswith("SELECT"):
-        raise ValueError("query_bigquery only permits SELECT statements.")
+    normalized = sql.strip().upper()
+    if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
+        raise ValueError("query_bigquery only permits SELECT (optionally WITH ... SELECT) statements.")
     job_config = bigquery.QueryJobConfig(query_parameters=params or [])
     rows = _get_client().query(sql, job_config=job_config).result()
     return [dict(row.items()) for row in rows]
@@ -188,6 +191,139 @@ def get_upcoming_tickets(engineer: str | None = None) -> list[dict]:
     return query_bigquery(sql, params=params)
 
 
+def _open_tickets_at_risk_sql() -> str:
+    """SQL for Bottleneck Detector: every open ticket in the *current* sprint,
+    with enough context (tags, priority, blocked status, reviewer if any) for
+    Gemini to cross-reference against the other three signal tools.
+
+    "Current sprint" = the soonest sprint whose end date is at or after the
+    dataset's own MAX(changed_date) (a proxy for "now" -- see
+    _developer_activity_sql's docstring for why CURRENT_TIMESTAMP() would
+    drift stale here). The generator guarantees the last generated sprint's
+    end_date equals generation-time "now", so this reliably resolves to that
+    last sprint, matching the demo's "N days before sprint end" framing.
+
+    The LEFT JOIN to pr_reviews means most New/Active tickets simply have a
+    NULL reviewer -- that's a real absence of signal, not a bug, and the
+    agent's instruction treats it as such.
+    """
+    return f"""
+    WITH anchor AS (
+      SELECT MAX(changed_date) AS now_ts FROM `{settings.bq_tickets_table_id}`
+    ),
+    sprints AS (
+      SELECT DISTINCT sprint_id, sprint_end_date FROM `{settings.bq_team_velocity_table_id}`
+    ),
+    current_sprint AS (
+      SELECT s.sprint_id, s.sprint_end_date
+      FROM sprints s, anchor a
+      WHERE s.sprint_end_date >= a.now_ts
+      ORDER BY s.sprint_end_date ASC
+      LIMIT 1
+    )
+    SELECT t.ticket_id, t.title, t.team, t.work_item_type, t.tags, t.priority, t.state,
+           t.sprint_id, cs.sprint_end_date,
+           TIMESTAMP_DIFF(cs.sprint_end_date, (SELECT now_ts FROM anchor), DAY) AS days_until_sprint_end,
+           t.is_blocked, t.blocked_reason, t.comment_count, t.created_date, t.changed_date,
+           pr.reviewer, pr.review_status
+    FROM `{settings.bq_tickets_table_id}` t
+    JOIN current_sprint cs ON t.sprint_id = cs.sprint_id
+    LEFT JOIN `{settings.bq_pr_reviews_table_id}` pr ON pr.ticket_id = t.ticket_id
+    WHERE t.state NOT IN ('Resolved', 'Closed')
+    ORDER BY t.priority ASC
+    """
+
+
+def get_open_tickets_at_risk() -> list[dict]:
+    """Return open tickets in the current sprint, with context for cross-referencing risk signals."""
+    return query_bigquery(_open_tickets_at_risk_sql())
+
+
+def _team_type_close_rates_sql() -> str:
+    """SQL for Bottleneck Detector: historical (finished-sprint-only)
+    close rate and average cycle time per team x work_item_type. "Historical"
+    excludes the current (still-open) sprint so a team's in-progress sprint
+    doesn't trivially look bad just for having open tickets -- anchored the
+    same way as _open_tickets_at_risk_sql.
+
+    Deliberately generic (GROUP BY team, work_item_type over all data) rather
+    than hardcoding the DevOps/Bug pattern from patterns.py -- the point is
+    for Gemini to discover the outlier itself from an aggregation, the same
+    way a human analyst would.
+    """
+    return f"""
+    WITH anchor AS (
+      SELECT MAX(changed_date) AS now_ts FROM `{settings.bq_tickets_table_id}`
+    ),
+    finished_sprints AS (
+      SELECT DISTINCT sprint_id FROM `{settings.bq_team_velocity_table_id}`, anchor
+      WHERE sprint_end_date < anchor.now_ts
+    )
+    SELECT t.team, t.work_item_type,
+           ROUND(COUNTIF(t.state IN ('Resolved', 'Closed')) / COUNT(*), 3) AS close_rate,
+           ROUND(AVG(TIMESTAMP_DIFF(COALESCE(t.closed_date, t.changed_date), t.created_date, HOUR)), 1)
+             AS avg_cycle_time_hours,
+           COUNT(*) AS ticket_count
+    FROM `{settings.bq_tickets_table_id}` t
+    WHERE t.sprint_id IN (SELECT sprint_id FROM finished_sprints)
+    GROUP BY t.team, t.work_item_type
+    HAVING COUNT(*) >= 5
+    ORDER BY close_rate ASC
+    """
+
+
+def get_team_type_close_rates() -> list[dict]:
+    """Return historical close rate and cycle time per team x work item type, from finished sprints only."""
+    return query_bigquery(_team_type_close_rates_sql())
+
+
+def _reviewer_latency_stats_sql() -> str:
+    """SQL for Bottleneck Detector: per-reviewer average review latency and
+    changes-requested rate, over completed reviews only. Generic GROUP BY --
+    doesn't hardcode which reviewer is slow.
+    """
+    return f"""
+    SELECT reviewer,
+           ROUND(AVG(review_latency_hours), 1) AS avg_latency_hours,
+           ROUND(COUNTIF(review_status = 'Changes Requested') / COUNT(*), 3) AS changes_requested_rate,
+           COUNT(*) AS review_count
+    FROM `{settings.bq_pr_reviews_table_id}`
+    WHERE review_status != 'Pending'
+    GROUP BY reviewer
+    HAVING COUNT(*) >= 5
+    ORDER BY avg_latency_hours DESC
+    """
+
+
+def get_reviewer_latency_stats() -> list[dict]:
+    """Return each reviewer's average review latency and changes-requested rate."""
+    return query_bigquery(_reviewer_latency_stats_sql())
+
+
+def _bug_close_rate_by_sprint_sql() -> str:
+    """SQL for Bottleneck Detector: Bug-only close rate per sprint, ordered by
+    sprint end date -- lets Gemini see a declining-trend signal directly as a
+    time series rather than being told "recent sprints are worse."
+    """
+    return f"""
+    SELECT t.sprint_id, s.sprint_end_date,
+           ROUND(COUNTIF(t.state IN ('Resolved', 'Closed')) / COUNT(*), 3) AS bug_close_rate,
+           COUNT(*) AS bug_count
+    FROM `{settings.bq_tickets_table_id}` t
+    JOIN (
+      SELECT DISTINCT sprint_id, sprint_end_date FROM `{settings.bq_team_velocity_table_id}`
+    ) s ON s.sprint_id = t.sprint_id
+    WHERE t.work_item_type = 'Bug'
+    GROUP BY t.sprint_id, s.sprint_end_date
+    ORDER BY s.sprint_end_date ASC
+    """
+
+
+def get_bug_close_rate_by_sprint() -> list[dict]:
+    """Return Bug-ticket close rate per sprint, ordered chronologically."""
+    return query_bigquery(_bug_close_rate_by_sprint_sql())
+
+
 tickets_tool = FunctionTool(get_tickets_snapshot)
 pr_reviews_tool = FunctionTool(get_pr_reviews_snapshot)
 velocity_tool = FunctionTool(get_team_velocity_snapshot)
@@ -195,4 +331,8 @@ flagged_tickets_tool = FunctionTool(get_flagged_tickets)
 pending_reviews_tool = FunctionTool(get_pending_reviews)
 activity_tool = FunctionTool(get_developer_activity)
 upcoming_tickets_tool = FunctionTool(get_upcoming_tickets)
+at_risk_tickets_tool = FunctionTool(get_open_tickets_at_risk)
+team_type_close_rates_tool = FunctionTool(get_team_type_close_rates)
+reviewer_latency_tool = FunctionTool(get_reviewer_latency_stats)
+bug_close_rate_trend_tool = FunctionTool(get_bug_close_rate_by_sprint)
 raw_query_tool = FunctionTool(query_bigquery)
