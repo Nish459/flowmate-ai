@@ -5,7 +5,6 @@ config/ only, never the reverse (see CLAUDE.md's module-boundary rule).
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -39,25 +38,23 @@ def health() -> dict:
 
 @app.post("/scan")
 async def scan() -> dict:
-    """Run all 4 agents concurrently and return each one's response, keyed
-    by agent name -- drives the demo dashboard's 4 panels. Concurrent rather
-    than the orchestrator's strict fan-out/fan-in ordering: none of the 4
-    agents' BigQuery reads depend on another agent's output.
+    """Run all 4 agents sequentially and return each one's response, keyed
+    by agent name -- drives the demo dashboard's 4 panels.
 
-    return_exceptions=True: a single agent hitting a transient failure (e.g.
-    the Gemini free tier's 5 req/min limit, hit in practice running all 4
-    concurrently) must not 500 the whole scan -- the other 3 panels should
-    still render. That agent's panel gets an error message instead.
+    Sequential, not concurrent: the Gemini Developer API key this project
+    uses sits on the free tier (5 req/min for gemini-3.6-flash), and running
+    4 agents at once blows past that immediately in practice. run_agent_once
+    already retries transient errors (429/503) with backoff; a per-agent
+    try/except here still isolates a failure that survives those retries to
+    just that one panel instead of 500ing the whole response.
     """
-    names = list(_SCAN_AGENTS.keys())
-    results = await asyncio.gather(
-        *(run_agent_once(agent, prompt, app_name=name) for name, (agent, prompt) in _SCAN_AGENTS.items()),
-        return_exceptions=True,
-    )
-    return {
-        name: (f"Error: {result}" if isinstance(result, Exception) else result)
-        for name, result in zip(names, results)
-    }
+    results = {}
+    for name, (agent, prompt) in _SCAN_AGENTS.items():
+        try:
+            results[name] = await run_agent_once(agent, prompt, app_name=name)
+        except Exception as exc:
+            results[name] = f"Error: {exc}"
+    return results
 
 
 @app.post("/standups/snapshot")
