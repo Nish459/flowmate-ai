@@ -200,8 +200,11 @@ def _developer_activity_sql(days: int = 1, per_engineer_limit: int = ACTIVITY_DE
     frozen at generation time and drifts further behind real wall-clock time
     with every day it isn't regenerated, so anchoring to wall-clock time would
     make "recent activity" silently return nothing a day or two after
-    generation. (Ticket Watcher's staleness check doesn't have this problem --
-    "older than 24h" only gets *more* true as time passes, never less.)
+    generation. (Ticket Watcher's flagged-tickets query had the mirror-image
+    version of this bug: "older than 24h" gets *more* true as drift grows, so
+    at 6 days of drift it matched every open ticket and masked the blocked and
+    unassigned ones behind it. Both are now anchored the same way -- any new
+    query comparing a dataset timestamp against "now" should anchor too.)
 
     `days` is a real parameter (not hardcoded to "today") so a future
     "what did I do last week" recall can call this with days=7 instead of
