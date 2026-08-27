@@ -71,36 +71,92 @@ def get_team_velocity_snapshot() -> list[dict]:
     )
 
 
-def _flagged_tickets_sql() -> str:
-    """SQL for Ticket Watcher: open tickets that are stale (24h+ untouched),
-    blocked, or missing an assignee. Filtering lives in SQL rather than the
-    LLM's reasoning -- date arithmetic should be exact, not inferred.
+# Staleness cutoff anchored to the dataset's own latest changed_date rather
+# than CURRENT_TIMESTAMP(). The synthetic dataset's clock is frozen at
+# generation time and drifts behind wall-clock; at 6 days of drift, EVERY open
+# ticket satisfied "changed_date < now() - 24h", so 'stale' matched all 441
+# open tickets and (being first in the CASE below) completely masked the 66
+# blocked and 13 unassigned ones. Anchoring keeps "stale" a meaningful subset
+# no matter how long since the dataset was regenerated.
+def _stale_cutoff_expr() -> str:
+    return (
+        f"(SELECT TIMESTAMP_SUB(MAX(changed_date), INTERVAL 24 HOUR) "
+        f"FROM `{settings.bq_tickets_table_id}`)"
+    )
+
+
+# Flag precedence, defined once so the detail query and the counts query can
+# never drift apart. Ordered most-actionable first: a blocked ticket that also
+# hasn't moved in 24h is blocked *because* it's blocked, so reporting it as
+# merely "stale" buries the useful reason.
+def _flag_reason_case() -> str:
+    return f"""
+           CASE
+             WHEN is_blocked THEN 'blocked'
+             WHEN assigned_to IS NULL THEN 'missing_assignee'
+             WHEN changed_date < {_stale_cutoff_expr()} THEN 'stale'
+           END AS flag_reason
+"""
+
+
+def _flagged_where() -> str:
+    return f"""
+    WHERE state NOT IN ('Resolved', 'Closed')
+      AND (
+        changed_date < {_stale_cutoff_expr()}
+        OR is_blocked
+        OR assigned_to IS NULL
+      )
+"""
+
+# The dataset has ~440 flagged tickets. Listing all of them takes ~97s of
+# token-by-token generation and produces output no human reads, so the detail
+# query is capped and get_flagged_ticket_counts() reports the full totals
+# alongside it -- nothing is hidden, it's just summarized instead of dumped.
+FLAGGED_TICKETS_DEFAULT_LIMIT = 25
+
+
+def _flagged_tickets_sql(limit: int = FLAGGED_TICKETS_DEFAULT_LIMIT) -> str:
+    """SQL for Ticket Watcher: the most urgent open tickets that are stale
+    (24h+ untouched), blocked, or missing an assignee. Filtering lives in SQL
+    rather than the LLM's reasoning -- date arithmetic should be exact, not
+    inferred. Capped at `limit`; see FLAGGED_TICKETS_DEFAULT_LIMIT.
     """
     return f"""
     SELECT ticket_id, title, team, state, assigned_to, priority, sprint_id,
            changed_date, is_blocked, blocked_reason,
-           CASE
-             WHEN state NOT IN ('Resolved', 'Closed')
-                  AND changed_date < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
-               THEN 'stale'
-             WHEN is_blocked THEN 'blocked'
-             WHEN assigned_to IS NULL AND state NOT IN ('Resolved', 'Closed')
-               THEN 'missing_assignee'
-           END AS flag_reason
+           {_flag_reason_case().strip()}
     FROM `{settings.bq_tickets_table_id}`
-    WHERE state NOT IN ('Resolved', 'Closed')
-      AND (
-        changed_date < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
-        OR is_blocked
-        OR assigned_to IS NULL
-      )
+    {_flagged_where().strip()}
     ORDER BY priority ASC, changed_date ASC
+    LIMIT {limit}
+    """
+
+
+def _flagged_ticket_counts_sql() -> str:
+    """SQL for Ticket Watcher: full totals per flag_reason, so the agent can
+    report "showing 25 of 441" rather than implying the capped detail list is
+    everything."""
+    return f"""
+    SELECT flag_reason, COUNT(*) AS ticket_count
+    FROM (
+      SELECT {_flag_reason_case().strip()}
+      FROM `{settings.bq_tickets_table_id}`
+      {_flagged_where().strip()}
+    )
+    GROUP BY flag_reason
+    ORDER BY ticket_count DESC
     """
 
 
 def get_flagged_tickets() -> list[dict]:
-    """Return open tickets that are stale (24h+ untouched), blocked, or missing an assignee."""
+    """Return the most urgent open tickets that are stale (24h+ untouched), blocked, or missing an assignee."""
     return query_bigquery(_flagged_tickets_sql())
+
+
+def get_flagged_ticket_counts() -> list[dict]:
+    """Return the total number of flagged tickets per flag reason (stale / blocked / missing_assignee)."""
+    return query_bigquery(_flagged_ticket_counts_sql())
 
 
 def _pending_reviews_sql(hours_threshold: int = 24) -> str:
@@ -127,7 +183,10 @@ def get_pending_reviews() -> list[dict]:
     return query_bigquery(_pending_reviews_sql())
 
 
-def _developer_activity_sql(days: int = 1) -> str:
+ACTIVITY_DEFAULT_PER_ENGINEER_LIMIT = 8
+
+
+def _developer_activity_sql(days: int = 1, per_engineer_limit: int = ACTIVITY_DEFAULT_PER_ENGINEER_LIMIT) -> str:
     """SQL for Standup Writer: per-engineer tickets touched in the last `days`
     that are either closed/resolved (done), active or in review (doing), or
     blocked (blocked). Requiring recent `changed_date` for all three keeps
@@ -147,17 +206,33 @@ def _developer_activity_sql(days: int = 1) -> str:
     `days` is a real parameter (not hardcoded to "today") so a future
     "what did I do last week" recall can call this with days=7 instead of
     needing a separate query function.
+
+    Capped at `per_engineer_limit` tickets *per engineer* via ROW_NUMBER
+    (not a plain LIMIT, which would drop whole engineers off the end of the
+    list): a standup is a scannable summary, and the uncapped ~200 rows took
+    ~18k characters of generation. Partitioning keeps every engineer present
+    with their most urgent tickets.
     """
     return f"""
+    WITH recent AS (
+      SELECT ticket_id, title, work_item_type, state, priority, team, sprint_id,
+             assigned_to, changed_date, closed_date, is_blocked, blocked_reason,
+             ROW_NUMBER() OVER (
+               PARTITION BY assigned_to
+               ORDER BY priority ASC, changed_date DESC
+             ) AS rn
+      FROM `{settings.bq_tickets_table_id}`
+      WHERE assigned_to IS NOT NULL
+        AND state IN ('Resolved', 'Closed', 'Active', 'In Review', 'Blocked')
+        AND changed_date >= (
+          SELECT TIMESTAMP_SUB(MAX(changed_date), INTERVAL {days} DAY)
+          FROM `{settings.bq_tickets_table_id}`
+        )
+    )
     SELECT ticket_id, title, work_item_type, state, priority, team, sprint_id,
            assigned_to, changed_date, closed_date, is_blocked, blocked_reason
-    FROM `{settings.bq_tickets_table_id}`
-    WHERE assigned_to IS NOT NULL
-      AND state IN ('Resolved', 'Closed', 'Active', 'In Review', 'Blocked')
-      AND changed_date >= (
-        SELECT TIMESTAMP_SUB(MAX(changed_date), INTERVAL {days} DAY)
-        FROM `{settings.bq_tickets_table_id}`
-      )
+    FROM recent
+    WHERE rn <= {per_engineer_limit}
     ORDER BY assigned_to, priority ASC
     """
 
@@ -328,6 +403,7 @@ tickets_tool = FunctionTool(get_tickets_snapshot)
 pr_reviews_tool = FunctionTool(get_pr_reviews_snapshot)
 velocity_tool = FunctionTool(get_team_velocity_snapshot)
 flagged_tickets_tool = FunctionTool(get_flagged_tickets)
+flagged_ticket_counts_tool = FunctionTool(get_flagged_ticket_counts)
 pending_reviews_tool = FunctionTool(get_pending_reviews)
 activity_tool = FunctionTool(get_developer_activity)
 upcoming_tickets_tool = FunctionTool(get_upcoming_tickets)

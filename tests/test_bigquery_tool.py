@@ -68,6 +68,7 @@ def test_snapshot_tools_are_wrapped_as_function_tools():
     assert isinstance(bigquery_tool.pr_reviews_tool, FunctionTool)
     assert isinstance(bigquery_tool.velocity_tool, FunctionTool)
     assert isinstance(bigquery_tool.flagged_tickets_tool, FunctionTool)
+    assert isinstance(bigquery_tool.flagged_ticket_counts_tool, FunctionTool)
     assert isinstance(bigquery_tool.pending_reviews_tool, FunctionTool)
     assert isinstance(bigquery_tool.activity_tool, FunctionTool)
     assert isinstance(bigquery_tool.upcoming_tickets_tool, FunctionTool)
@@ -87,6 +88,52 @@ def test_flagged_tickets_sql_covers_all_three_flag_conditions():
     assert "'missing_assignee'" in sql
     # Terminal-state tickets should never be flagged.
     assert "NOT IN ('Resolved', 'Closed')" in sql
+
+
+def test_flagged_tickets_staleness_is_anchored_to_dataset_not_wallclock():
+    """Regression: with CURRENT_TIMESTAMP(), 6 days of dataset clock drift made
+    every open ticket 'stale', which (being first in the CASE) masked all the
+    blocked and unassigned tickets entirely."""
+    sql = bigquery_tool._flagged_tickets_sql()
+    assert "CURRENT_TIMESTAMP" not in sql
+    assert "MAX(changed_date)" in sql
+
+
+def test_flagged_tickets_precedence_puts_blocked_before_stale():
+    """A blocked ticket that also hasn't moved in 24h should report as blocked --
+    the blocker is the actionable reason, 'stale' buries it."""
+    case_sql = bigquery_tool._flag_reason_case()
+    assert case_sql.index("'blocked'") < case_sql.index("'stale'")
+    assert case_sql.index("'missing_assignee'") < case_sql.index("'stale'")
+
+
+def test_flagged_tickets_sql_is_capped():
+    sql = bigquery_tool._flagged_tickets_sql(limit=10)
+    assert "LIMIT 10" in sql
+
+
+def test_flagged_ticket_counts_sql_reports_totals_per_reason():
+    sql = bigquery_tool._flagged_ticket_counts_sql()
+    assert "COUNT(*)" in sql
+    assert "GROUP BY flag_reason" in sql
+    # Counts must be uncapped -- they exist to report the true totals behind
+    # the capped detail list.
+    assert "LIMIT" not in sql.upper()
+
+
+def test_get_flagged_ticket_counts_runs_the_counts_sql(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql, params=None):
+        captured["sql"] = sql
+        return [{"flag_reason": "blocked", "ticket_count": 66}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_flagged_ticket_counts()
+
+    assert result == [{"flag_reason": "blocked", "ticket_count": 66}]
+    assert captured["sql"] == bigquery_tool._flagged_ticket_counts_sql()
 
 
 def test_flagged_tickets_sql_is_select_only():
@@ -155,10 +202,19 @@ def test_get_pending_reviews_runs_the_pending_reviews_sql(monkeypatch):
 
 def test_developer_activity_sql_covers_done_doing_blocked():
     sql = bigquery_tool._developer_activity_sql(days=7)
-    assert sql.strip().upper().startswith("SELECT")
+    assert sql.strip().upper().startswith("WITH")
     assert "INTERVAL 7 DAY" in sql
     assert "'Resolved', 'Closed'" in sql
     assert "'Active', 'In Review', 'Blocked'" in sql
+
+
+def test_developer_activity_sql_caps_per_engineer_not_globally():
+    """A plain LIMIT would drop whole engineers off the end; the cap must be
+    partitioned so every engineer keeps their most urgent tickets."""
+    sql = bigquery_tool._developer_activity_sql(per_engineer_limit=3)
+    assert "PARTITION BY assigned_to" in sql
+    assert "rn <= 3" in sql
+    assert "LIMIT 3" not in sql
 
 
 def test_get_developer_activity_defaults_to_one_day(monkeypatch):
