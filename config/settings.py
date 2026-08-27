@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     bq_team_velocity_table: str = Field("team_velocity", alias="BQ_TEAM_VELOCITY_TABLE")
 
     firestore_standups_collection: str = Field("standups", alias="FIRESTORE_STANDUPS_COLLECTION")
+    firestore_scans_collection: str = Field("scans", alias="FIRESTORE_SCANS_COLLECTION")
 
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     gemini_model: str = Field("gemini-3.6-flash", alias="GEMINI_MODEL")

@@ -6,15 +6,20 @@ config/ only, never the reverse (see CLAUDE.md's module-boundary rule).
 from __future__ import annotations
 
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents.bottleneck_detector.agent import root_agent as bottleneck_detector  # noqa: E402
 from agents.common.agent_runner import run_agent_once  # noqa: E402
-from agents.common.firestore_client import get_standup_history, write_standup_snapshot  # noqa: E402
+from agents.common.firestore_client import (  # noqa: E402
+    get_latest_scan,
+    get_standup_history,
+    write_scan_snapshot,
+    write_standup_snapshot,
+)
 from agents.review_nudger.agent import root_agent as review_nudger  # noqa: E402
 from agents.standup_writer.agent import root_agent as standup_writer  # noqa: E402
 from agents.standup_writer.snapshot import build_daily_snapshots  # noqa: E402
@@ -36,25 +41,66 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _merge_scan_results(new_results: dict, previous: dict | None, generated_at: str) -> dict:
+    """Build the cache document, preserving the last *successful* output for any
+    agent that failed this run.
+
+    A full sequential scan takes ~6.5 min and can partly fail on the free tier's
+    quota. Without this merge, one quota-failed refresh would overwrite good
+    cached output with error strings -- i.e. break the demo precisely when the
+    API is being flaky. Per-agent `generated_at` records how stale each panel is.
+    """
+    previous_agents = (previous or {}).get("agents", {})
+    agents = {}
+    for name, result in new_results.items():
+        if result["ok"]:
+            agents[name] = {**result, "generated_at": generated_at}
+            continue
+        prior = previous_agents.get(name)
+        if prior and prior.get("ok"):
+            agents[name] = prior
+        else:
+            agents[name] = {**result, "generated_at": generated_at}
+    return {"generated_at": generated_at, "agents": agents}
+
+
 @app.post("/scan")
 async def scan() -> dict:
-    """Run all 4 agents sequentially and return each one's response, keyed
-    by agent name -- drives the demo dashboard's 4 panels.
+    """Run all 4 agents sequentially, cache the result to Firestore, and return it.
+
+    This is the *refresh* path and is slow by nature (~6.5 min measured: each
+    agent turn needs multiple Gemini round trips). The dashboard should read
+    `GET /scan/latest` instead so it renders instantly; run this in the
+    background or ahead of a demo.
 
     Sequential, not concurrent: the Gemini Developer API key this project
-    uses sits on the free tier (5 req/min for gemini-3.6-flash), and running
-    4 agents at once blows past that immediately in practice. run_agent_once
-    already retries transient errors (429/503) with backoff; a per-agent
-    try/except here still isolates a failure that survives those retries to
+    uses sits on the free tier (5 req/min, 20 req/day for gemini-3.6-flash),
+    and running 4 agents at once blows past that immediately in practice.
+    run_agent_once already retries transient errors (429/503) with backoff; the
+    per-agent try/except here isolates a failure that survives those retries to
     just that one panel instead of 500ing the whole response.
     """
-    results = {}
+    new_results = {}
     for name, (agent, prompt) in _SCAN_AGENTS.items():
         try:
-            results[name] = await run_agent_once(agent, prompt, app_name=name)
+            new_results[name] = {"text": await run_agent_once(agent, prompt, app_name=name), "ok": True}
         except Exception as exc:
-            results[name] = f"Error: {exc}"
-    return results
+            new_results[name] = {"text": f"Error: {exc}", "ok": False}
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    snapshot = _merge_scan_results(new_results, get_latest_scan(), generated_at)
+    write_scan_snapshot(snapshot)
+    return snapshot
+
+
+@app.get("/scan/latest")
+def latest_scan() -> dict:
+    """Return the cached scan output -- what the dashboard loads. Instant, no
+    Gemini calls, so demo rendering never waits on a live multi-minute scan."""
+    cached = get_latest_scan()
+    if cached is None:
+        raise HTTPException(status_code=404, detail="No cached scan yet -- POST /scan first.")
+    return cached
 
 
 @app.post("/standups/snapshot")

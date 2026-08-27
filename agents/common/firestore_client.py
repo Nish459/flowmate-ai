@@ -42,6 +42,22 @@ def write_standup_snapshot(engineer: str, date: str, snapshot: dict) -> None:
     _days_ref(engineer).document(date).set({**snapshot, "date": date, "engineer": engineer})
 
 
+def _scans_ref():
+    return _get_client().collection(settings.firestore_scans_collection)
+
+
+def write_scan_snapshot(snapshot: dict) -> None:
+    """Cache the latest agent scan output so the dashboard can render instantly
+    instead of waiting out a live multi-minute scan."""
+    _scans_ref().document("latest").set(snapshot)
+
+
+def get_latest_scan() -> dict | None:
+    """Return the cached scan output, or None if no scan has been cached yet."""
+    doc = _scans_ref().document("latest").get()
+    return doc.to_dict() if doc.exists else None
+
+
 def get_standup_history(engineer: str, start_date: str, end_date: str) -> list[dict]:
     """Return an engineer's cached standups between start_date and end_date
     (inclusive, both YYYY-MM-DD), ordered chronologically."""

@@ -13,18 +13,28 @@ def test_health():
     assert resp.json() == {"status": "ok"}
 
 
+def _stub_scan_cache(monkeypatch, previous=None):
+    """Stub the Firestore read/write around /scan and capture what got cached."""
+    captured = {}
+    monkeypatch.setattr(api_main, "get_latest_scan", lambda: previous)
+    monkeypatch.setattr(api_main, "write_scan_snapshot", lambda snap: captured.update(snap))
+    return captured
+
+
 def test_scan_returns_all_four_agent_responses(monkeypatch):
     async def fake_run_agent_once(agent, prompt, app_name):
         return f"response for {app_name}"
 
     monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+    _stub_scan_cache(monkeypatch)
 
     resp = client.post("/scan")
 
     assert resp.status_code == 200
-    data = resp.json()
-    assert set(data.keys()) == {"ticket_watcher", "bottleneck_detector", "review_nudger", "standup_writer"}
-    assert data["ticket_watcher"] == "response for ticket_watcher"
+    agents = resp.json()["agents"]
+    assert set(agents.keys()) == {"ticket_watcher", "bottleneck_detector", "review_nudger", "standup_writer"}
+    assert agents["ticket_watcher"]["text"] == "response for ticket_watcher"
+    assert agents["ticket_watcher"]["ok"] is True
 
 
 def test_scan_isolates_a_failing_agent_from_the_others(monkeypatch):
@@ -34,13 +44,84 @@ def test_scan_isolates_a_failing_agent_from_the_others(monkeypatch):
         return f"response for {app_name}"
 
     monkeypatch.setattr(api_main, "run_agent_once", flaky_run_agent_once)
+    _stub_scan_cache(monkeypatch)
 
     resp = client.post("/scan")
 
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["ticket_watcher"] == "response for ticket_watcher"
-    assert "429 RESOURCE_EXHAUSTED" in data["review_nudger"]
+    agents = resp.json()["agents"]
+    assert agents["ticket_watcher"]["text"] == "response for ticket_watcher"
+    assert agents["review_nudger"]["ok"] is False
+    assert "429 RESOURCE_EXHAUSTED" in agents["review_nudger"]["text"]
+
+
+def test_scan_caches_its_result(monkeypatch):
+    async def fake_run_agent_once(agent, prompt, app_name):
+        return f"response for {app_name}"
+
+    monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+    captured = _stub_scan_cache(monkeypatch)
+
+    client.post("/scan")
+
+    assert set(captured["agents"].keys()) == set(api_main._SCAN_AGENTS.keys())
+    assert captured["generated_at"]
+
+
+def test_merge_scan_results_keeps_last_good_output_for_a_failed_agent():
+    previous = {
+        "generated_at": "2026-08-26T10:00:00+00:00",
+        "agents": {
+            "ticket_watcher": {"text": "good old output", "ok": True, "generated_at": "2026-08-26T10:00:00+00:00"},
+        },
+    }
+    new_results = {"ticket_watcher": {"text": "Error: 429", "ok": False}}
+
+    merged = api_main._merge_scan_results(new_results, previous, "2026-08-27T10:00:00+00:00")
+
+    # A quota-failed refresh must not clobber a good cached panel.
+    assert merged["agents"]["ticket_watcher"]["text"] == "good old output"
+    assert merged["agents"]["ticket_watcher"]["generated_at"] == "2026-08-26T10:00:00+00:00"
+    assert merged["generated_at"] == "2026-08-27T10:00:00+00:00"
+
+
+def test_merge_scan_results_prefers_fresh_success_over_cached():
+    previous = {
+        "agents": {"ticket_watcher": {"text": "stale", "ok": True, "generated_at": "2026-08-26T10:00:00+00:00"}}
+    }
+    new_results = {"ticket_watcher": {"text": "fresh", "ok": True}}
+
+    merged = api_main._merge_scan_results(new_results, previous, "2026-08-27T10:00:00+00:00")
+
+    assert merged["agents"]["ticket_watcher"]["text"] == "fresh"
+    assert merged["agents"]["ticket_watcher"]["generated_at"] == "2026-08-27T10:00:00+00:00"
+
+
+def test_merge_scan_results_surfaces_error_when_no_prior_success():
+    new_results = {"ticket_watcher": {"text": "Error: 429", "ok": False}}
+
+    merged = api_main._merge_scan_results(new_results, None, "2026-08-27T10:00:00+00:00")
+
+    assert merged["agents"]["ticket_watcher"]["ok"] is False
+    assert "Error: 429" in merged["agents"]["ticket_watcher"]["text"]
+
+
+def test_latest_scan_returns_cached_output(monkeypatch):
+    cached = {"generated_at": "2026-08-27T10:00:00+00:00", "agents": {"ticket_watcher": {"text": "x", "ok": True}}}
+    monkeypatch.setattr(api_main, "get_latest_scan", lambda: cached)
+
+    resp = client.get("/scan/latest")
+
+    assert resp.status_code == 200
+    assert resp.json() == cached
+
+
+def test_latest_scan_404s_when_nothing_cached(monkeypatch):
+    monkeypatch.setattr(api_main, "get_latest_scan", lambda: None)
+
+    resp = client.get("/scan/latest")
+
+    assert resp.status_code == 404
 
 
 def test_generate_standup_snapshot_writes_each_engineer(monkeypatch):
