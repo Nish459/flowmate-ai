@@ -95,10 +95,13 @@ class _FakeClient:
     def __init__(self):
         self._engineers: dict = {}
         self.scans = _FakeScansCollection()
+        self.panels = _FakeScansCollection()
 
     def collection(self, name):
         if name == firestore_client.settings.firestore_scans_collection:
             return self.scans
+        if name == firestore_client.settings.firestore_panels_collection:
+            return self.panels
         assert name == firestore_client.settings.firestore_standups_collection
         return _FakeStandupsCollection(self)
 
@@ -169,3 +172,20 @@ def test_write_scan_snapshot_overwrites_the_single_latest_doc(monkeypatch):
 
     assert firestore_client.get_latest_scan()["generated_at"] == "second"
     assert len(fake_client.scans.store) == 1
+
+
+def test_write_and_read_latest_panels_round_trip(monkeypatch):
+    fake_client = _FakeClient()
+    monkeypatch.setattr(firestore_client, "_get_client", lambda: fake_client)
+
+    snapshot = {"generated_at": "2026-08-30T10:00:00+00:00", "ticket_watcher": {"tickets": [], "counts": []}}
+    firestore_client.write_panels_snapshot(snapshot)
+
+    assert firestore_client.get_latest_panels() == snapshot
+
+
+def test_get_latest_panels_returns_none_when_never_cached(monkeypatch):
+    fake_client = _FakeClient()
+    monkeypatch.setattr(firestore_client, "_get_client", lambda: fake_client)
+
+    assert firestore_client.get_latest_panels() is None

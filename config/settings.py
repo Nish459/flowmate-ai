@@ -24,6 +24,15 @@ class Settings(BaseSettings):
 
     firestore_standups_collection: str = Field("standups", alias="FIRESTORE_STANDUPS_COLLECTION")
     firestore_scans_collection: str = Field("scans", alias="FIRESTORE_SCANS_COLLECTION")
+    firestore_panels_collection: str = Field("panels", alias="FIRESTORE_PANELS_COLLECTION")
+
+    cors_allowed_origins: str = Field(
+        "http://localhost:5173", alias="CORS_ALLOWED_ORIGINS"
+    )
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     gemini_model: str = Field("gemini-3.6-flash", alias="GEMINI_MODEL")

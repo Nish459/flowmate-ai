@@ -163,6 +163,61 @@ def test_standup_history_defaults_to_last_seven_days(monkeypatch):
     assert start == (date.today() - timedelta(days=7)).isoformat()
 
 
+def test_panels_returns_structured_data_from_all_four_sources(monkeypatch):
+    monkeypatch.setattr(api_main, "get_flagged_tickets_full", lambda: [{"ticket_id": "TFS-1"}])
+    monkeypatch.setattr(api_main, "get_flagged_ticket_counts", lambda: [{"flag_reason": "stale", "ticket_count": 1}])
+    monkeypatch.setattr(api_main, "get_pending_reviews", lambda: [{"pr_id": "PR-1"}])
+    monkeypatch.setattr(api_main, "get_open_tickets_at_risk", lambda: [{"ticket_id": "TFS-2"}])
+    monkeypatch.setattr(api_main, "build_daily_snapshots", lambda: {"Jane": {"done": []}})
+    monkeypatch.setattr(api_main, "write_panels_snapshot", lambda snap: None)
+
+    resp = client.get("/panels")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ticket_watcher"] == {
+        "tickets": [{"ticket_id": "TFS-1"}],
+        "counts": [{"flag_reason": "stale", "ticket_count": 1}],
+    }
+    assert data["review_nudger"] == {"reviews": [{"pr_id": "PR-1"}]}
+    assert data["bottleneck_detector"] == {"tickets": [{"ticket_id": "TFS-2"}]}
+    assert data["standup_writer"] == {"engineers": {"Jane": {"done": []}}}
+    assert data["generated_at"]
+
+
+def test_panels_caches_its_result(monkeypatch):
+    monkeypatch.setattr(api_main, "get_flagged_tickets_full", lambda: [])
+    monkeypatch.setattr(api_main, "get_flagged_ticket_counts", lambda: [])
+    monkeypatch.setattr(api_main, "get_pending_reviews", lambda: [])
+    monkeypatch.setattr(api_main, "get_open_tickets_at_risk", lambda: [])
+    monkeypatch.setattr(api_main, "build_daily_snapshots", lambda: {})
+    captured = {}
+    monkeypatch.setattr(api_main, "write_panels_snapshot", lambda snap: captured.update(snap))
+
+    client.get("/panels")
+
+    assert captured["generated_at"]
+    assert captured["ticket_watcher"] == {"tickets": [], "counts": []}
+
+
+def test_latest_panels_returns_cached_output(monkeypatch):
+    cached = {"generated_at": "2026-08-30T10:00:00+00:00", "ticket_watcher": {"tickets": [], "counts": []}}
+    monkeypatch.setattr(api_main, "get_latest_panels", lambda: cached)
+
+    resp = client.get("/panels/latest")
+
+    assert resp.status_code == 200
+    assert resp.json() == cached
+
+
+def test_latest_panels_404s_when_nothing_cached(monkeypatch):
+    monkeypatch.setattr(api_main, "get_latest_panels", lambda: None)
+
+    resp = client.get("/panels/latest")
+
+    assert resp.status_code == 404
+
+
 def test_standup_history_respects_explicit_range(monkeypatch):
     captured = {}
 

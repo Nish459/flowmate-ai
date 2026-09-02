@@ -156,6 +156,22 @@ def test_get_flagged_tickets_runs_the_flagged_sql(monkeypatch):
     assert captured["sql"] == bigquery_tool._flagged_tickets_sql()
 
 
+def test_get_flagged_tickets_full_uses_the_higher_table_limit(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql):
+        captured["sql"] = sql
+        return []
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    bigquery_tool.get_flagged_tickets_full()
+
+    assert captured["sql"] == bigquery_tool._flagged_tickets_sql(bigquery_tool.FLAGGED_TICKETS_TABLE_LIMIT)
+    assert f"LIMIT {bigquery_tool.FLAGGED_TICKETS_TABLE_LIMIT}" in captured["sql"]
+    assert bigquery_tool.FLAGGED_TICKETS_TABLE_LIMIT > bigquery_tool.FLAGGED_TICKETS_DEFAULT_LIMIT
+
+
 def test_query_bigquery_passes_params_to_job_config(monkeypatch):
     captured = {}
 

@@ -57,3 +57,20 @@ def test_only_bug_tickets_have_severity(small_tickets_df):
 
 def test_blocked_state_implies_is_blocked_flag(small_tickets_df):
     assert small_tickets_df.loc[small_tickets_df["state"] == "Blocked", "is_blocked"].all()
+
+
+def test_titles_come_from_the_capitalized_template_bank(small_tickets_df):
+    from synthetic.tickets import TAG_TITLE_SUBJECTS, TITLE_COMPONENTS, TITLE_TEMPLATES
+
+    all_subjects = set(TITLE_COMPONENTS) | {s for pool in TAG_TITLE_SUBJECTS.values() for s in pool}
+    possible_titles_by_type = {
+        work_item_type: {
+            (template.format(subject=subject))[0].upper() + template.format(subject=subject)[1:]
+            for template in templates
+            for subject in all_subjects
+        }
+        for work_item_type, templates in TITLE_TEMPLATES.items()
+    }
+
+    for title, work_item_type in zip(small_tickets_df["title"], small_tickets_df["work_item_type"]):
+        assert title in possible_titles_by_type[work_item_type]

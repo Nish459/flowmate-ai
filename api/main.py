@@ -6,17 +6,27 @@ config/ only, never the reverse (see CLAUDE.md's module-boundary rule).
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents.bottleneck_detector.agent import root_agent as bottleneck_detector  # noqa: E402
 from agents.common.agent_runner import run_agent_once  # noqa: E402
+from agents.common.bigquery_tool import (  # noqa: E402
+    get_flagged_ticket_counts,
+    get_flagged_tickets_full,
+    get_open_tickets_at_risk,
+    get_pending_reviews,
+)
 from agents.common.firestore_client import (  # noqa: E402
+    get_latest_panels,
     get_latest_scan,
     get_standup_history,
+    write_panels_snapshot,
     write_scan_snapshot,
     write_standup_snapshot,
 )
@@ -24,8 +34,20 @@ from agents.review_nudger.agent import root_agent as review_nudger  # noqa: E402
 from agents.standup_writer.agent import root_agent as standup_writer  # noqa: E402
 from agents.standup_writer.snapshot import build_daily_snapshots  # noqa: E402
 from agents.ticket_watcher.agent import root_agent as ticket_watcher  # noqa: E402
+from config.settings import settings  # noqa: E402
 
 app = FastAPI(title="FlowMate API")
+
+# The React frontend (Vite dev server, later Firebase Hosting) is a separate
+# origin from this API -- see CLAUDE.md's module-boundary rule (frontend
+# talks to the backend's HTTP API only, never to BigQuery/Firestore
+# directly), which requires CORS to actually be reachable from the browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins_list,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 # Same prompts already verified live against each agent in its own milestone.
 _SCAN_AGENTS = {
@@ -100,6 +122,54 @@ def latest_scan() -> dict:
     cached = get_latest_scan()
     if cached is None:
         raise HTTPException(status_code=404, detail="No cached scan yet -- POST /scan first.")
+    return cached
+
+
+@app.get("/panels")
+def panels() -> dict:
+    """Structured, LLM-free ticket/PR/standup data for the dashboard's
+    filterable tables -- plain BigQuery reads (fast, no Gemini calls, no
+    quota cost), unlike /scan/latest's agent-written prose. The two are
+    complementary: this endpoint drives the sortable/filterable table in each
+    panel, and /scan/latest's text is shown alongside as the agent's written
+    take on the same data.
+
+    This is the *refresh* path (like POST /scan): it hits BigQuery live and
+    caches the result to Firestore. The dashboard should read GET
+    /panels/latest instead so it loads instantly; call this only on an
+    explicit user-triggered refresh.
+
+    The 5 underlying queries are independent reads, so they run concurrently
+    via a thread pool (google-cloud-bigquery's client is blocking, not async)
+    -- measured ~13s sequential vs ~3s concurrent, bounded by the slowest
+    single query rather than their sum. Still too slow to run on every page
+    load, hence the Firestore cache.
+    """
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        tickets = pool.submit(get_flagged_tickets_full)
+        counts = pool.submit(get_flagged_ticket_counts)
+        reviews = pool.submit(get_pending_reviews)
+        at_risk = pool.submit(get_open_tickets_at_risk)
+        standups = pool.submit(build_daily_snapshots)
+        snapshot = {
+            "ticket_watcher": {"tickets": tickets.result(), "counts": counts.result()},
+            "review_nudger": {"reviews": reviews.result()},
+            "bottleneck_detector": {"tickets": at_risk.result()},
+            "standup_writer": {"engineers": standups.result()},
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    write_panels_snapshot(snapshot)
+    return snapshot
+
+
+@app.get("/panels/latest")
+def latest_panels() -> dict:
+    """Return the cached structured panel data -- what the dashboard loads.
+    Instant (Firestore read), no BigQuery calls, so the dashboard never waits
+    on a live ~3s multi-query fan-out just to render."""
+    cached = get_latest_panels()
+    if cached is None:
+        raise HTTPException(status_code=404, detail="No cached panel data yet -- GET /panels first.")
     return cached
 
 

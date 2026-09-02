@@ -154,6 +154,19 @@ def get_flagged_tickets() -> list[dict]:
     return query_bigquery(_flagged_tickets_sql())
 
 
+# For the dashboard's filterable table, not the LLM tool -- a browser can
+# filter/sort/paginate client-side, so it gets a much higher cap than the
+# 25-row LLM-facing default (see FLAGGED_TICKETS_DEFAULT_LIMIT's docstring for
+# why that one stays small).
+FLAGGED_TICKETS_TABLE_LIMIT = 500
+
+
+def get_flagged_tickets_full(limit: int = FLAGGED_TICKETS_TABLE_LIMIT) -> list[dict]:
+    """Return flagged tickets for the dashboard table -- same filtering as
+    get_flagged_tickets(), much less aggressively capped."""
+    return query_bigquery(_flagged_tickets_sql(limit))
+
+
 def get_flagged_ticket_counts() -> list[dict]:
     """Return the total number of flagged tickets per flag reason (stale / blocked / missing_assignee)."""
     return query_bigquery(_flagged_ticket_counts_sql())

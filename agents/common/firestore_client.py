@@ -58,6 +58,23 @@ def get_latest_scan() -> dict | None:
     return doc.to_dict() if doc.exists else None
 
 
+def _panels_ref():
+    return _get_client().collection(settings.firestore_panels_collection)
+
+
+def write_panels_snapshot(snapshot: dict) -> None:
+    """Cache the latest structured ticket/PR/standup tables so the dashboard's
+    tables render instantly instead of waiting on live BigQuery reads (~3s for
+    5 queries -- fine for an explicit refresh, not for every page load)."""
+    _panels_ref().document("latest").set(snapshot)
+
+
+def get_latest_panels() -> dict | None:
+    """Return the cached structured panel data, or None if never cached."""
+    doc = _panels_ref().document("latest").get()
+    return doc.to_dict() if doc.exists else None
+
+
 def get_standup_history(engineer: str, start_date: str, end_date: str) -> list[dict]:
     """Return an engineer's cached standups between start_date and end_date
     (inclusive, both YYYY-MM-DD), ordered chronologically."""

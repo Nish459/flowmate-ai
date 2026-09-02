@@ -1,0 +1,106 @@
+:root {
+  --text: #6b6f7a;
+  --text-dim: #8b8f99;
+  --text-h: #14141a;
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #f0eff5;
+  --border: #e3e2e8;
+  --code-bg: #f0eff5;
+  --accent: #8b3ff2;
+  --accent-2: #b06bff;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(139, 63, 242, 0.1);
+  --ok: #17915a;
+  --ok-bg: rgba(23, 145, 90, 0.1);
+  --error: #d6304a;
+  --error-bg: rgba(214, 48, 74, 0.1);
+  --shadow-sm: 0 1px 2px rgba(20, 20, 26, 0.06);
+  --shadow-md: 0 8px 24px -8px rgba(20, 20, 26, 0.12);
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
+
+  --sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  font: 15px/1.5 var(--sans);
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #a3a7b3;
+    --text-dim: #75798a;
+    --text-h: #f2f2f5;
+    --bg: #0e0e13;
+    --surface: #17171f;
+    --surface-2: #1e1e28;
+    --border: #2a2a36;
+    --code-bg: #1e1e28;
+    --accent: #a663ff;
+    --accent-2: #c084fc;
+    --accent-contrast: #ffffff;
+    --accent-soft: rgba(166, 99, 255, 0.16);
+    --ok: #3ddc97;
+    --ok-bg: rgba(61, 220, 151, 0.12);
+    --error: #ff6b81;
+    --error-bg: rgba(255, 107, 129, 0.12);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 12px 32px -8px rgba(0, 0, 0, 0.55);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1, h2, h3 {
+  color: var(--text-h);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-h);
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input, select {
+  font: inherit;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-h);
+}
+
+input:focus, select:focus, button:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}

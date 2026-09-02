@@ -41,6 +41,78 @@ BLOCKED_REASONS = [
     "Blocked by failing CI pipeline",
 ]
 
+# Ticket titles read as real engineering work rather than Faker's word-salad
+# sentences. Subjects are tag-aware (a `migration`/`database`-tagged ticket
+# gets a matching subject) so the titles reinforce the same engineered
+# bottleneck patterns (patterns.py) instead of looking unrelated to them.
+TITLE_COMPONENTS = [
+    "checkout flow", "authentication service", "billing pipeline", "search indexing",
+    "notification service", "onboarding wizard", "API gateway", "admin dashboard",
+    "reporting engine", "user profile page", "payments processor", "inventory sync",
+    "messaging queue", "analytics pipeline", "mobile app shell", "settings page",
+    "recommendation engine", "audit log service", "session handler", "rate limiter",
+]
+TAG_TITLE_SUBJECTS = {
+    "migration": ["legacy schema migration", "customer data migration job", "database migration script"],
+    "database": ["primary database", "read replica", "database schema", "connection pool"],
+    "security": ["OAuth flow", "access control layer", "session token handling", "secrets rotation"],
+    "perf": ["query performance", "page load time", "API response latency", "cache hit rate"],
+    "flaky-test": ["integration test suite", "end-to-end test suite", "CI test runner"],
+    "api": ["public API", "internal API", "webhook delivery", "API rate limiter"],
+}
+
+TITLE_TEMPLATES = {
+    "Bug": [
+        "Fix crash in {subject}",
+        "{subject} returns incorrect results intermittently",
+        "Unhandled exception when using {subject}",
+        "Regression in {subject} after last deploy",
+        "{subject} times out under load",
+        "Data inconsistency in {subject}",
+    ],
+    "Task": [
+        "Refactor {subject} for maintainability",
+        "Add monitoring to {subject}",
+        "Upgrade {subject} dependencies",
+        "Clean up dead code in {subject}",
+        "Improve error handling in {subject}",
+        "Write integration tests for {subject}",
+    ],
+    "User Story": [
+        "As a user, I want faster {subject} response times",
+        "As a user, I want clearer error messages in {subject}",
+        "As an admin, I want visibility into {subject} health",
+        "As a user, I want {subject} to support bulk actions",
+    ],
+    "Feature": [
+        "Add multi-region support to {subject}",
+        "Introduce rate limiting for {subject}",
+        "Support bulk export from {subject}",
+        "Add audit logging to {subject}",
+        "Enable single sign-on for {subject}",
+    ],
+    "Epic": [
+        "{subject} platform modernization",
+        "Migrate {subject} to new architecture",
+        "{subject} reliability initiative",
+        "{subject} scalability overhaul",
+    ],
+}
+
+
+def _pick_title_subject(rng: np.random.Generator, tags: str | None) -> str:
+    for tag in (tags.split(", ") if tags else []):
+        if tag in TAG_TITLE_SUBJECTS:
+            return str(rng.choice(TAG_TITLE_SUBJECTS[tag]))
+    return str(rng.choice(TITLE_COMPONENTS))
+
+
+def _pick_title(rng: np.random.Generator, work_item_type: str, tags: str | None) -> str:
+    subject = _pick_title_subject(rng, tags)
+    template = str(rng.choice(TITLE_TEMPLATES[work_item_type]))
+    title = template.format(subject=subject)
+    return title[0].upper() + title[1:]
+
 _TERMINAL_STATES = {"Resolved", "Closed"}
 _OPEN_STATES = {"New", "Active", "In Review", "Blocked"}
 
@@ -167,7 +239,7 @@ def _make_ticket(
 
     return {
         "ticket_id": f"TFS-{10000 + idx}",
-        "title": fake.sentence(nb_words=6).rstrip("."),
+        "title": _pick_title(rng, work_item_type, tags),
         "description": fake.paragraph(nb_sentences=3),
         "work_item_type": work_item_type,
         "state": state,
