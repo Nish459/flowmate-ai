@@ -55,7 +55,7 @@ _SCAN_AGENTS = {
     "ticket_watcher": (ticket_watcher, "What tickets need attention right now?"),
     "bottleneck_detector": (bottleneck_detector, "Which tickets are at risk of missing the deadline?"),
     "review_nudger": (review_nudger, "What needs a nudge?"),
-    "standup_writer": (standup_writer, "Give me today's standups."),
+    "standup_writer": (standup_writer, "What team-level patterns or risks show up in today's standups?"),
 }
 
 
