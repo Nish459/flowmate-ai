@@ -2,10 +2,25 @@ import sys
 from pathlib import Path
 
 from google.adk.agents import Agent
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from agents.common.bigquery_tool import flagged_ticket_counts_tool, flagged_tickets_tool  # noqa: E402
 from config.settings import settings  # noqa: E402
+
+
+class TicketWatcherFinding(BaseModel):
+    title: str = Field(description="Short label, e.g. '170 stale tickets, concentrated in DevOps'.")
+    body: str = Field(description="A few sentences with the most urgent examples. Reference real ticket IDs.")
+    teams: list[str] = Field(description="Every team that appears among the tickets this finding covers.")
+    flag_reasons: list[str] = Field(
+        description="Subset of ['stale', 'blocked', 'missing_assignee'] this finding is about."
+    )
+
+
+class TicketWatcherFindings(BaseModel):
+    findings: list[TicketWatcherFinding]
+
 
 root_agent = Agent(
     name="ticket_watcher",
@@ -19,18 +34,20 @@ root_agent = Agent(
         "list is deliberately capped, so it is a sample of the most urgent ones, NOT "
         "the complete set. The tool already computes which flag applies via the "
         "flag_reason field, so do not re-derive it yourself.\n\n"
-        "Start with a one-line summary of the totals from get_flagged_ticket_counts() "
-        "(e.g. '441 tickets need attention: 380 stale, 45 blocked, 16 unassigned').\n\n"
-        "Then, for each flag_reason group (Stale / Blocked / Missing Assignee), list "
-        "the tickets from get_flagged_tickets() that fall in it, most urgent first -- "
-        "priority 1 is the highest urgency, 4 is the lowest, matching standard "
-        "TFS/Azure DevOps convention. Give each ticket ONE short line: ticket ID, "
-        "title, team, and why it's flagged (how long stale, or the blocked_reason). "
-        "Keep it scannable -- no paragraphs per ticket.\n\n"
-        "Make clear you're showing the most urgent items, not all of them, and say "
-        "how many more exist in that group per the counts. If a group has no tickets "
-        "at all, say so briefly. If nothing is flagged anywhere, say the sprint is "
-        "healthy."
+        "Produce one finding PER flag_reason that has any tickets (stale / blocked / "
+        "missing_assignee) -- do not skip a category just because another one is "
+        "bigger. Each finding's title should state the total count for that reason "
+        "(from get_flagged_ticket_counts()) and call out which team(s) it's "
+        "concentrated in, if any. The body should name the most urgent 3-5 examples "
+        "from get_flagged_tickets() with ticket ID, team, and why it's flagged (how "
+        "long stale, or the blocked_reason) -- not every ticket, just enough to be "
+        "concrete. If a team is disproportionately represented within a reason "
+        "(e.g. most of the blocked tickets are DevOps), say so explicitly -- that's "
+        "more useful than a flat list.\n\n"
+        "For every finding, list every team it concerns in `teams`, and which "
+        "flag_reason(s) it's about in `flag_reasons` (usually just one, since each "
+        "finding covers one reason)."
     ),
     tools=[flagged_ticket_counts_tool, flagged_tickets_tool],
+    output_schema=TicketWatcherFindings,
 )

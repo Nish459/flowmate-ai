@@ -20,6 +20,19 @@ import "./App.css";
 // Standup History has its own independent, on-demand data source.
 const DATA_TAB_KEYS = ["ticket_watcher", "bottleneck_detector", "review_nudger", "standup_writer"];
 
+// Every agent's `text` is JSON (see each agents/*/agent.py's output_schema).
+// A stale cache from before that agent's schema shipped would still be
+// markdown prose, so this falls back to null rather than crashing -- the
+// panel then just shows nothing extra until a fresh /scan repopulates it.
+function parseFindings(agentResult) {
+  if (!agentResult?.ok) return null;
+  try {
+    return JSON.parse(agentResult.text).findings ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const [scan, setScan] = useState(null);
   const [panels, setPanels] = useState(null);
@@ -85,6 +98,7 @@ function App() {
         <AgentPanel
           agent={scan?.agents?.ticket_watcher}
           stats={panels && ticketWatcherStats(panels.ticket_watcher.counts)}
+          findings={parseFindings(scan?.agents?.ticket_watcher)}
           table={
             panels && {
               rows: panels.ticket_watcher.tickets,
@@ -108,6 +122,7 @@ function App() {
         <AgentPanel
           agent={scan?.agents?.bottleneck_detector}
           stats={panels && bottleneckStats(panels.bottleneck_detector.tickets)}
+          findings={parseFindings(scan?.agents?.bottleneck_detector)}
           table={
             panels && {
               rows: panels.bottleneck_detector.tickets,
@@ -132,6 +147,7 @@ function App() {
         <AgentPanel
           agent={scan?.agents?.review_nudger}
           stats={panels && reviewNudgerStats(panels.review_nudger.reviews)}
+          findings={parseFindings(scan?.agents?.review_nudger)}
           table={
             panels && {
               rows: panels.review_nudger.reviews,
@@ -153,23 +169,11 @@ function App() {
       label: "Standup Writer",
       render: () => {
         const rows = panels && flattenStandupEngineers(panels.standup_writer.engineers);
-        // The agent's `text` is JSON (see agents/standup_writer/agent.py's
-        // output_schema) -- a stale cache from before that change would be
-        // markdown prose instead, so this falls back to null rather than
-        // crashing; the panel then shows nothing extra until a fresh /scan.
-        let findings = null;
-        if (scan?.agents?.standup_writer?.ok) {
-          try {
-            findings = JSON.parse(scan.agents.standup_writer.text).findings;
-          } catch {
-            findings = null;
-          }
-        }
         return (
           <AgentPanel
             agent={scan?.agents?.standup_writer}
             stats={rows && standupStats(rows)}
-            findings={findings}
+            findings={parseFindings(scan?.agents?.standup_writer)}
             table={
               rows && {
                 rows,

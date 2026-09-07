@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from google.adk.agents import Agent
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from agents.common.bigquery_tool import (  # noqa: E402
@@ -11,6 +12,20 @@ from agents.common.bigquery_tool import (  # noqa: E402
     team_type_close_rates_tool,
 )
 from config.settings import settings  # noqa: E402
+
+
+class BottleneckFinding(BaseModel):
+    title: str = Field(description="e.g. 'TFS-10634 -- High risk (0 days left)'.")
+    body: str = Field(description="1-3 sentences naming the specific signal(s) that drove the risk call, with real numbers.")
+    risk_level: str = Field(description="One of 'High', 'Medium', 'Low'.")
+    teams: list[str] = Field(description="The team(s) this finding's ticket(s) belong to.")
+    work_item_types: list[str] = Field(description="The work item type(s) involved, e.g. ['Bug'].")
+    states: list[str] = Field(description="The ticket state(s) involved, e.g. ['Blocked'].")
+
+
+class BottleneckFindings(BaseModel):
+    findings: list[BottleneckFinding]
+
 
 root_agent = Agent(
     name="bottleneck_detector",
@@ -43,14 +58,16 @@ root_agent = Agent(
         "changes_requested_rate much higher than their peers in the stats list?\n"
         "4. If it's a Bug, do the most recent sprints in the trend show a "
         "meaningfully lower close rate than earlier ones?\n\n"
-        "Combine whichever signals actually apply into a High / Medium / Low risk "
-        "call per ticket, with a one- or two-line reason naming the specific "
-        "signal(s) that drove it (cite the actual numbers, e.g. 'this team+type "
-        "combo has a 32% close rate vs 70%+ elsewhere'). Always state "
-        "days_until_sprint_end. Rank highest risk first. If a ticket has none of "
-        "these signals, leave it out entirely rather than flagging everything -- "
-        "a list that flags every ticket is worthless. If nothing in the current "
-        "sprint shows real risk signal, say so plainly."
+        "Emit one finding per ticket that has at least one real signal from above -- "
+        "leave tickets with none of these signals out entirely rather than flagging "
+        "everything; a list that flags every ticket is worthless. Combine whichever "
+        "signals apply into a High/Medium/Low `risk_level`, and put the specific "
+        "signal(s) that drove it in the body, citing actual numbers (e.g. 'this "
+        "team+type combo has a 32% close rate vs 70%+ elsewhere') and "
+        "days_until_sprint_end. If nothing in the current sprint shows real risk "
+        "signal, return no findings rather than inventing one.\n\n"
+        "For every finding, list its ticket's team in `teams`, work_item_type in "
+        "`work_item_types`, and state in `states`."
     ),
     tools=[
         at_risk_tickets_tool,
@@ -58,4 +75,5 @@ root_agent = Agent(
         reviewer_latency_tool,
         bug_close_rate_trend_tool,
     ],
+    output_schema=BottleneckFindings,
 )

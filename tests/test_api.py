@@ -21,9 +21,13 @@ def _stub_scan_cache(monkeypatch, previous=None):
     return captured
 
 
+def _fake_findings_json(app_name):
+    return f'{{"findings": [], "source": "{app_name}"}}'
+
+
 def test_scan_returns_all_four_agent_responses(monkeypatch):
     async def fake_run_agent_once(agent, prompt, app_name):
-        return f"response for {app_name}"
+        return _fake_findings_json(app_name)
 
     monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
     _stub_scan_cache(monkeypatch)
@@ -33,7 +37,7 @@ def test_scan_returns_all_four_agent_responses(monkeypatch):
     assert resp.status_code == 200
     agents = resp.json()["agents"]
     assert set(agents.keys()) == {"ticket_watcher", "bottleneck_detector", "review_nudger", "standup_writer"}
-    assert agents["ticket_watcher"]["text"] == "response for ticket_watcher"
+    assert agents["ticket_watcher"]["text"] == _fake_findings_json("ticket_watcher")
     assert agents["ticket_watcher"]["ok"] is True
 
 
@@ -41,7 +45,7 @@ def test_scan_isolates_a_failing_agent_from_the_others(monkeypatch):
     async def flaky_run_agent_once(agent, prompt, app_name):
         if app_name == "review_nudger":
             raise RuntimeError("429 RESOURCE_EXHAUSTED")
-        return f"response for {app_name}"
+        return _fake_findings_json(app_name)
 
     monkeypatch.setattr(api_main, "run_agent_once", flaky_run_agent_once)
     _stub_scan_cache(monkeypatch)
@@ -50,16 +54,16 @@ def test_scan_isolates_a_failing_agent_from_the_others(monkeypatch):
 
     assert resp.status_code == 200
     agents = resp.json()["agents"]
-    assert agents["ticket_watcher"]["text"] == "response for ticket_watcher"
+    assert agents["ticket_watcher"]["text"] == _fake_findings_json("ticket_watcher")
     assert agents["review_nudger"]["ok"] is False
     assert "429 RESOURCE_EXHAUSTED" in agents["review_nudger"]["text"]
 
 
-def test_scan_treats_invalid_standup_writer_json_as_a_failure(monkeypatch):
+def test_scan_treats_invalid_json_as_a_failure(monkeypatch):
     async def fake_run_agent_once(agent, prompt, app_name):
         if app_name == "standup_writer":
             return "not valid json"
-        return f"response for {app_name}"
+        return _fake_findings_json(app_name)
 
     monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
     _stub_scan_cache(monkeypatch)
@@ -76,7 +80,7 @@ def test_scan_accepts_valid_standup_writer_json(monkeypatch):
     async def fake_run_agent_once(agent, prompt, app_name):
         if app_name == "standup_writer":
             return '{"findings": []}'
-        return f"response for {app_name}"
+        return _fake_findings_json(app_name)
 
     monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
     _stub_scan_cache(monkeypatch)
@@ -91,7 +95,7 @@ def test_scan_accepts_valid_standup_writer_json(monkeypatch):
 
 def test_scan_caches_its_result(monkeypatch):
     async def fake_run_agent_once(agent, prompt, app_name):
-        return f"response for {app_name}"
+        return _fake_findings_json(app_name)
 
     monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
     captured = _stub_scan_cache(monkeypatch)

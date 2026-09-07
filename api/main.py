@@ -108,12 +108,12 @@ async def scan() -> dict:
     for name, (agent, prompt) in _SCAN_AGENTS.items():
         try:
             text = await run_agent_once(agent, prompt, app_name=name)
-            if name == "standup_writer":
-                # output_schema should already guarantee this; validate before
-                # caching so a malformed response degrades to "keep last good
-                # cache" (existing per-agent fallback below) instead of
-                # shipping unparseable text to the frontend.
-                json.loads(text)
+            # All 4 agents now use output_schema (tagged findings, not prose) --
+            # this should already guarantee valid JSON; validate before caching
+            # so a malformed response degrades to "keep last good cache"
+            # (existing per-agent fallback below) instead of shipping
+            # unparseable text to the frontend.
+            json.loads(text)
             new_results[name] = {"text": text, "ok": True}
         except Exception as exc:
             new_results[name] = {"text": f"Error: {exc}", "ok": False}
