@@ -27,13 +27,16 @@ from agents.common.bigquery_tool import (  # noqa: E402
 from agents.common.firestore_client import (  # noqa: E402
     get_latest_panels,
     get_latest_scan,
+    get_personal_standup,
     get_standup_history,
     write_panels_snapshot,
+    write_personal_standup,
     write_scan_snapshot,
     write_standup_snapshot,
 )
 from agents.review_nudger.agent import root_agent as review_nudger  # noqa: E402
 from agents.standup_writer.agent import root_agent as standup_writer  # noqa: E402
+from agents.standup_writer.personal_agent import root_agent as personal_standup_agent  # noqa: E402
 from agents.standup_writer.snapshot import build_daily_snapshots  # noqa: E402
 from agents.ticket_watcher.agent import root_agent as ticket_watcher  # noqa: E402
 from config.settings import settings  # noqa: E402
@@ -212,3 +215,30 @@ def standup_history(engineer: str, start: str | None = None, end: str | None = N
     if start is None:
         start = (date.today() - timedelta(days=7)).isoformat()
     return get_standup_history(engineer, start, end)
+
+
+@app.post("/standups/{engineer}/generate")
+async def generate_personal_standup(engineer: str, force: bool = False) -> dict:
+    """On-demand, live-Gemini personal standup for one engineer -- distinct
+    from both /standups/{engineer} (deterministic cached history) and the
+    team-wide standup_writer AI Insight (cross-team patterns, not any one
+    person's day).
+
+    Cached per (engineer, today) with no automatic expiry -- repeat calls the
+    same day just re-serve the cache, at zero additional quota cost.
+    `force=True` (the "Regenerate" action) is the only way to bypass the
+    cache and spend a fresh live call; there's no background TTL, so quota
+    spend stays tied to a deliberate user click, not a timer.
+    """
+    today = date.today().isoformat()
+    if not force:
+        cached = get_personal_standup(engineer, today)
+        if cached:
+            return cached
+
+    text = await run_agent_once(
+        personal_standup_agent, f"Generate the daily standup for {engineer}.", app_name="personal_standup"
+    )
+    result = {"text": text, "generated_at": datetime.now(timezone.utc).isoformat()}
+    write_personal_standup(engineer, today, result)
+    return result

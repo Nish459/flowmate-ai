@@ -12,6 +12,7 @@ import {
   ticketWatcherColumns,
   ticketWatcherStats,
 } from "./panels";
+import PersonalStandup from "./PersonalStandup";
 import StandupHistory from "./StandupHistory";
 import Tabs from "./Tabs";
 import "./App.css";
@@ -170,23 +171,26 @@ function App() {
       render: () => {
         const rows = panels && flattenStandupEngineers(panels.standup_writer.engineers);
         return (
-          <AgentPanel
-            agent={scan?.agents?.standup_writer}
-            stats={rows && standupStats(rows)}
-            findings={parseFindings(scan?.agents?.standup_writer)}
-            table={
-              rows && {
-                rows,
-                columns: standupWriterColumns(),
-                filters: [
-                  { key: "engineer", label: "Engineer" },
-                  { key: "bucket", label: "Status" },
-                ],
-                searchKeys: ["ticket_id", "title"],
-                defaultSort: { key: "engineer", direction: "asc" },
+          <>
+            <PersonalStandup />
+            <AgentPanel
+              agent={scan?.agents?.standup_writer}
+              stats={rows && standupStats(rows)}
+              findings={parseFindings(scan?.agents?.standup_writer)}
+              table={
+                rows && {
+                  rows,
+                  columns: standupWriterColumns(),
+                  filters: [
+                    { key: "engineer", label: "Engineer" },
+                    { key: "bucket", label: "Status" },
+                  ],
+                  searchKeys: ["ticket_id", "title"],
+                  defaultSort: { key: "engineer", direction: "asc" },
+                }
               }
-            }
-          />
+            />
+          </>
         );
       },
     },

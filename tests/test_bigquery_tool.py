@@ -217,20 +217,29 @@ def test_get_pending_reviews_runs_the_pending_reviews_sql(monkeypatch):
 
 
 def test_developer_activity_sql_covers_done_doing_blocked():
-    sql = bigquery_tool._developer_activity_sql(days=7)
+    sql, params = bigquery_tool._developer_activity_sql(days=7)
     assert sql.strip().upper().startswith("WITH")
     assert "INTERVAL 7 DAY" in sql
     assert "'Resolved', 'Closed'" in sql
     assert "'Active', 'In Review', 'Blocked'" in sql
+    assert params == []
 
 
 def test_developer_activity_sql_caps_per_engineer_not_globally():
     """A plain LIMIT would drop whole engineers off the end; the cap must be
     partitioned so every engineer keeps their most urgent tickets."""
-    sql = bigquery_tool._developer_activity_sql(per_engineer_limit=3)
+    sql, _ = bigquery_tool._developer_activity_sql(per_engineer_limit=3)
     assert "PARTITION BY assigned_to" in sql
     assert "rn <= 3" in sql
     assert "LIMIT 3" not in sql
+
+
+def test_developer_activity_sql_with_engineer_binds_a_parameter():
+    sql, params = bigquery_tool._developer_activity_sql(engineer="Angie Henderson")
+    assert "assigned_to = @engineer" in sql
+    assert len(params) == 1
+    assert params[0].name == "engineer"
+    assert params[0].value == "Angie Henderson"
 
 
 def test_get_developer_activity_defaults_to_one_day(monkeypatch):
@@ -238,13 +247,30 @@ def test_get_developer_activity_defaults_to_one_day(monkeypatch):
 
     def fake_query_bigquery(sql, params=None):
         captured["sql"] = sql
+        captured["params"] = params
         return []
 
     monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
 
     bigquery_tool.get_developer_activity()
 
-    assert captured["sql"] == bigquery_tool._developer_activity_sql(days=1)
+    expected_sql, expected_params = bigquery_tool._developer_activity_sql(days=1)
+    assert captured["sql"] == expected_sql
+    assert captured["params"] == expected_params
+
+
+def test_get_developer_activity_with_engineer_passes_the_bound_parameter(monkeypatch):
+    captured = {}
+
+    def fake_query_bigquery(sql, params=None):
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    bigquery_tool.get_developer_activity(engineer="Angie Henderson")
+
+    assert captured["params"][0].value == "Angie Henderson"
 
 
 def test_upcoming_tickets_sql_without_engineer_has_no_params():

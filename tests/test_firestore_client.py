@@ -79,6 +79,8 @@ class _FakeEngineerDoc:
         self._engineer = engineer
 
     def collection(self, name):
+        if name == "personal_generated":
+            return self._client._personal_generated.setdefault(self._engineer, _FakeDaysCollection())
         assert name == "days"
         return self._client._engineers.setdefault(self._engineer, _FakeDaysCollection())
 
@@ -94,6 +96,7 @@ class _FakeStandupsCollection:
 class _FakeClient:
     def __init__(self):
         self._engineers: dict = {}
+        self._personal_generated: dict = {}
         self.scans = _FakeScansCollection()
         self.panels = _FakeScansCollection()
 
@@ -189,3 +192,41 @@ def test_get_latest_panels_returns_none_when_never_cached(monkeypatch):
     monkeypatch.setattr(firestore_client, "_get_client", lambda: fake_client)
 
     assert firestore_client.get_latest_panels() is None
+
+
+def test_write_and_read_personal_standup_round_trip(monkeypatch):
+    fake_client = _FakeClient()
+    monkeypatch.setattr(firestore_client, "_get_client", lambda: fake_client)
+
+    result = {"text": "You closed TFS-1...", "generated_at": "2026-09-07T10:00:00+00:00"}
+    firestore_client.write_personal_standup("Jane Doe", "2026-09-07", result)
+
+    assert firestore_client.get_personal_standup("Jane Doe", "2026-09-07") == result
+
+
+def test_get_personal_standup_returns_none_when_never_generated(monkeypatch):
+    fake_client = _FakeClient()
+    monkeypatch.setattr(firestore_client, "_get_client", lambda: fake_client)
+
+    assert firestore_client.get_personal_standup("Jane Doe", "2026-09-07") is None
+
+
+def test_personal_standup_is_scoped_separately_from_the_daily_snapshot(monkeypatch):
+    """Regression guard: the deterministic Standup History snapshot and this
+    on-demand LLM narrative must not share storage, or one would silently
+    overwrite the other."""
+    fake_client = _FakeClient()
+    monkeypatch.setattr(firestore_client, "_get_client", lambda: fake_client)
+
+    firestore_client.write_standup_snapshot("Jane Doe", "2026-09-07", {"done": []})
+    firestore_client.write_personal_standup(
+        "Jane Doe", "2026-09-07", {"text": "narrative", "generated_at": "now"}
+    )
+
+    assert firestore_client.get_standup_history("Jane Doe", "2026-09-07", "2026-09-07") == [
+        {"done": [], "date": "2026-09-07", "engineer": "Jane Doe"}
+    ]
+    assert firestore_client.get_personal_standup("Jane Doe", "2026-09-07") == {
+        "text": "narrative",
+        "generated_at": "now",
+    }

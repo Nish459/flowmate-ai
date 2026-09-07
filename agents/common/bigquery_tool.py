@@ -199,7 +199,11 @@ def get_pending_reviews() -> list[dict]:
 ACTIVITY_DEFAULT_PER_ENGINEER_LIMIT = 8
 
 
-def _developer_activity_sql(days: int = 1, per_engineer_limit: int = ACTIVITY_DEFAULT_PER_ENGINEER_LIMIT) -> str:
+def _developer_activity_sql(
+    days: int = 1,
+    per_engineer_limit: int = ACTIVITY_DEFAULT_PER_ENGINEER_LIMIT,
+    engineer: str | None = None,
+) -> tuple[str, list[bigquery.ScalarQueryParameter]]:
     """SQL for Standup Writer: per-engineer tickets touched in the last `days`
     that are either closed/resolved (done), active or in review (doing), or
     blocked (blocked). Requiring recent `changed_date` for all three keeps
@@ -228,8 +232,18 @@ def _developer_activity_sql(days: int = 1, per_engineer_limit: int = ACTIVITY_DE
     list): a standup is a scannable summary, and the uncapped ~200 rows took
     ~18k characters of generation. Partitioning keeps every engineer present
     with their most urgent tickets.
+
+    `engineer` is optional and, like `_upcoming_tickets_sql`'s, always bound
+    as a query parameter rather than interpolated -- it's LLM-suppliable (the
+    personal-standup agent passes it). `None` (the default) preserves the
+    original whole-team behavior for every existing caller.
     """
-    return f"""
+    params = []
+    engineer_filter = ""
+    if engineer:
+        engineer_filter = "AND assigned_to = @engineer"
+        params.append(bigquery.ScalarQueryParameter("engineer", "STRING", engineer))
+    sql = f"""
     WITH recent AS (
       SELECT ticket_id, title, work_item_type, state, priority, team, sprint_id,
              assigned_to, changed_date, closed_date, is_blocked, blocked_reason,
@@ -244,6 +258,7 @@ def _developer_activity_sql(days: int = 1, per_engineer_limit: int = ACTIVITY_DE
           SELECT TIMESTAMP_SUB(MAX(changed_date), INTERVAL {days} DAY)
           FROM `{settings.bq_tickets_table_id}`
         )
+        {engineer_filter}
     )
     SELECT ticket_id, title, work_item_type, state, priority, team, sprint_id,
            assigned_to, changed_date, closed_date, is_blocked, blocked_reason
@@ -251,11 +266,14 @@ def _developer_activity_sql(days: int = 1, per_engineer_limit: int = ACTIVITY_DE
     WHERE rn <= {per_engineer_limit}
     ORDER BY assigned_to, priority ASC
     """
+    return sql, params
 
 
-def get_developer_activity(days: int = 1) -> list[dict]:
-    """Return each assigned engineer's recently closed, active/in-review, and blocked tickets."""
-    return query_bigquery(_developer_activity_sql(days))
+def get_developer_activity(days: int = 1, engineer: str | None = None) -> list[dict]:
+    """Return recently closed, active/in-review, and blocked tickets -- for
+    every assigned engineer, or just one if `engineer` is given."""
+    sql, params = _developer_activity_sql(days, engineer=engineer)
+    return query_bigquery(sql, params=params)
 
 
 def _upcoming_tickets_sql(engineer: str | None = None) -> tuple[str, list[bigquery.ScalarQueryParameter]]:

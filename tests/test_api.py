@@ -278,3 +278,51 @@ def test_standup_history_respects_explicit_range(monkeypatch):
 
     assert resp.status_code == 200
     assert captured["args"] == ("Jane", "2026-08-01", "2026-08-05")
+
+
+def test_generate_personal_standup_returns_cached_result_without_calling_the_agent(monkeypatch):
+    cached = {"text": "You closed TFS-1...", "generated_at": "2026-09-07T09:00:00+00:00"}
+    monkeypatch.setattr(api_main, "get_personal_standup", lambda engineer, today: cached)
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("should not call the agent when a cache hit exists")
+
+    monkeypatch.setattr(api_main, "run_agent_once", fail_if_called)
+
+    resp = client.post("/standups/Jane/generate")
+
+    assert resp.status_code == 200
+    assert resp.json() == cached
+
+
+def test_generate_personal_standup_calls_the_agent_on_a_cache_miss(monkeypatch):
+    monkeypatch.setattr(api_main, "get_personal_standup", lambda engineer, today: None)
+    written = {}
+    monkeypatch.setattr(api_main, "write_personal_standup", lambda engineer, today, result: written.update(result))
+
+    async def fake_run_agent_once(agent, prompt, app_name):
+        assert "Jane" in prompt
+        return "You closed TFS-1, you're doing TFS-2."
+
+    monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+
+    resp = client.post("/standups/Jane/generate")
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "You closed TFS-1, you're doing TFS-2."
+    assert written["text"] == "You closed TFS-1, you're doing TFS-2."
+
+
+def test_generate_personal_standup_force_bypasses_the_cache(monkeypatch):
+    monkeypatch.setattr(api_main, "get_personal_standup", lambda engineer, today: {"text": "stale"})
+
+    async def fake_run_agent_once(agent, prompt, app_name):
+        return "fresh"
+
+    monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+    monkeypatch.setattr(api_main, "write_personal_standup", lambda engineer, today, result: None)
+
+    resp = client.post("/standups/Jane/generate?force=true")
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "fresh"

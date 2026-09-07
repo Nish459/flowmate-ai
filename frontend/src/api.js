@@ -9,6 +9,15 @@ async function getJson(path) {
   return res.json();
 }
 
+async function postJson(path) {
+  const res = await fetch(`${API_BASE_URL}${path}`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ""}`);
+  }
+  return res.json();
+}
+
 export function getLatestScan() {
   return getJson("/scan/latest");
 }
@@ -23,6 +32,11 @@ export function refreshPanels() {
 
 export function getEngineers() {
   return getJson("/engineers");
+}
+
+export function generatePersonalStandup(engineer, force = false) {
+  const qs = force ? "?force=true" : "";
+  return postJson(`/standups/${encodeURIComponent(engineer)}/generate${qs}`);
 }
 
 export function getStandupHistory(engineer, start, end) {

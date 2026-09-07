@@ -75,6 +75,32 @@ def get_latest_panels() -> dict | None:
     return doc.to_dict() if doc.exists else None
 
 
+def _personal_generated_ref(engineer: str):
+    return (
+        _get_client()
+        .collection(settings.firestore_standups_collection)
+        .document(engineer)
+        .collection("personal_generated")
+    )
+
+
+def write_personal_standup(engineer: str, date: str, result: dict) -> None:
+    """Cache one engineer's on-demand, LLM-generated personal standup for
+    `date` (YYYY-MM-DD). Deliberately a separate subcollection from
+    write_standup_snapshot's `days` -- that one is the deterministic
+    Python-computed snapshot Standup History browses; conflating the two
+    would mean this LLM narrative and that structured record could
+    overwrite each other."""
+    _personal_generated_ref(engineer).document(date).set(result)
+
+
+def get_personal_standup(engineer: str, date: str) -> dict | None:
+    """Return the cached personal standup for `date`, or None if this
+    engineer hasn't generated one yet today."""
+    doc = _personal_generated_ref(engineer).document(date).get()
+    return doc.to_dict() if doc.exists else None
+
+
 def get_standup_history(engineer: str, start_date: str, end_date: str) -> list[dict]:
     """Return an engineer's cached standups between start_date and end_date
     (inclusive, both YYYY-MM-DD), ordered chronologically."""
