@@ -1,5 +1,6 @@
 import { useState } from "react";
 import FilterableTable from "./FilterableTable";
+import FindingsList from "./FindingsList";
 import Markdown from "./Markdown";
 
 function TableSkeleton() {
@@ -32,8 +33,13 @@ function formatTimestamp(iso) {
   }
 }
 
-export default function AgentPanel({ agent, table, stats }) {
+// `findings`, when provided, is a parsed list of tagged AI findings (see
+// FindingsList) shown instead of the raw agent prose, filtered live by
+// whatever the table's own filters/search are currently set to -- no extra
+// Gemini calls, since it's the same cached findings just sliced client-side.
+export default function AgentPanel({ agent, table, stats, findings }) {
   const [showInsight, setShowInsight] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({ filterValues: {}, search: "" });
 
   return (
     <div className={`panel-layout ${showInsight ? "panel-layout-expanded" : ""}`}>
@@ -64,7 +70,7 @@ export default function AgentPanel({ agent, table, stats }) {
           </div>
         )}
 
-        {table ? <FilterableTable {...table} /> : <TableSkeleton />}
+        {table ? <FilterableTable {...table} onFilterChange={setActiveFilters} /> : <TableSkeleton />}
       </div>
 
       {showInsight && (
@@ -74,7 +80,15 @@ export default function AgentPanel({ agent, table, stats }) {
             <span className="panel-side-caret">Hide ▲</span>
           </button>
           {agent && <span className="panel-meta panel-side-timestamp">{formatTimestamp(agent.generated_at)}</span>}
-          <div className="panel-side-body">{agent ? <Markdown text={agent.text} /> : <InsightSkeleton />}</div>
+          <div className="panel-side-body">
+            {!agent ? (
+              <InsightSkeleton />
+            ) : findings ? (
+              <FindingsList findings={findings} activeFilters={activeFilters} />
+            ) : (
+              <Markdown text={agent.text} />
+            )}
+          </div>
         </aside>
       )}
     </div>

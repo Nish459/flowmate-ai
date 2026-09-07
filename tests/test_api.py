@@ -55,6 +55,40 @@ def test_scan_isolates_a_failing_agent_from_the_others(monkeypatch):
     assert "429 RESOURCE_EXHAUSTED" in agents["review_nudger"]["text"]
 
 
+def test_scan_treats_invalid_standup_writer_json_as_a_failure(monkeypatch):
+    async def fake_run_agent_once(agent, prompt, app_name):
+        if app_name == "standup_writer":
+            return "not valid json"
+        return f"response for {app_name}"
+
+    monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+    _stub_scan_cache(monkeypatch)
+
+    resp = client.post("/scan")
+
+    assert resp.status_code == 200
+    agents = resp.json()["agents"]
+    assert agents["standup_writer"]["ok"] is False
+    assert agents["ticket_watcher"]["ok"] is True
+
+
+def test_scan_accepts_valid_standup_writer_json(monkeypatch):
+    async def fake_run_agent_once(agent, prompt, app_name):
+        if app_name == "standup_writer":
+            return '{"findings": []}'
+        return f"response for {app_name}"
+
+    monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+    _stub_scan_cache(monkeypatch)
+
+    resp = client.post("/scan")
+
+    assert resp.status_code == 200
+    agents = resp.json()["agents"]
+    assert agents["standup_writer"]["ok"] is True
+    assert agents["standup_writer"]["text"] == '{"findings": []}'
+
+
 def test_scan_caches_its_result(monkeypatch):
     async def fake_run_agent_once(agent, prompt, app_name):
         return f"response for {app_name}"

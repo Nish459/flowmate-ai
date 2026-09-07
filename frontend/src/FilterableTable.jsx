@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 function uniqueValues(rows, key) {
   const values = new Set();
@@ -22,10 +22,26 @@ function compare(a, b) {
  * table state -- the interaction (filter dropdowns, text search, sortable
  * headers) is identical everywhere.
  */
-export default function FilterableTable({ rows, columns, filters = [], searchKeys = [], defaultSort, rowKey }) {
+export default function FilterableTable({
+  rows,
+  columns,
+  filters = [],
+  searchKeys = [],
+  defaultSort,
+  rowKey,
+  onFilterChange,
+}) {
   const [filterValues, setFilterValues] = useState({});
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState(defaultSort ?? null);
+
+  // Lets a parent (e.g. AgentPanel) react to the same filter/search state the
+  // table itself uses, without owning it -- used to keep an AI findings list
+  // in sync with whatever the user has filtered the grid to.
+  useEffect(() => {
+    onFilterChange?.({ filterValues, search });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterValues, search]);
 
   const filterOptions = useMemo(
     () => filters.map((f) => ({ ...f, options: uniqueValues(rows, f.key) })),

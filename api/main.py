@@ -5,6 +5,7 @@ config/ only, never the reverse (see CLAUDE.md's module-boundary rule).
 
 from __future__ import annotations
 
+import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -106,7 +107,14 @@ async def scan() -> dict:
     new_results = {}
     for name, (agent, prompt) in _SCAN_AGENTS.items():
         try:
-            new_results[name] = {"text": await run_agent_once(agent, prompt, app_name=name), "ok": True}
+            text = await run_agent_once(agent, prompt, app_name=name)
+            if name == "standup_writer":
+                # output_schema should already guarantee this; validate before
+                # caching so a malformed response degrades to "keep last good
+                # cache" (existing per-agent fallback below) instead of
+                # shipping unparseable text to the frontend.
+                json.loads(text)
+            new_results[name] = {"text": text, "ok": True}
         except Exception as exc:
             new_results[name] = {"text": f"Error: {exc}", "ok": False}
 

@@ -153,10 +153,23 @@ function App() {
       label: "Standup Writer",
       render: () => {
         const rows = panels && flattenStandupEngineers(panels.standup_writer.engineers);
+        // The agent's `text` is JSON (see agents/standup_writer/agent.py's
+        // output_schema) -- a stale cache from before that change would be
+        // markdown prose instead, so this falls back to null rather than
+        // crashing; the panel then shows nothing extra until a fresh /scan.
+        let findings = null;
+        if (scan?.agents?.standup_writer?.ok) {
+          try {
+            findings = JSON.parse(scan.agents.standup_writer.text).findings;
+          } catch {
+            findings = null;
+          }
+        }
         return (
           <AgentPanel
             agent={scan?.agents?.standup_writer}
             stats={rows && standupStats(rows)}
+            findings={findings}
             table={
               rows && {
                 rows,
