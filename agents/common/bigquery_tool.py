@@ -415,6 +415,25 @@ def get_bug_close_rate_by_sprint() -> list[dict]:
     return query_bigquery(_bug_close_rate_by_sprint_sql())
 
 
+def _all_engineers_sql() -> str:
+    """SQL for the dashboard's Standup History engineer dropdown: distinct
+    assigned engineers, alphabetical. Deliberately not routed through
+    get_developer_activity()/build_daily_snapshots() -- those pull full
+    per-engineer ticket detail, which is unrelated work for populating a
+    dropdown."""
+    return f"""
+    SELECT DISTINCT assigned_to AS engineer
+    FROM `{settings.bq_tickets_table_id}`
+    WHERE assigned_to IS NOT NULL
+    ORDER BY engineer
+    """
+
+
+def get_all_engineers() -> list[str]:
+    """Return every distinct engineer name that has assigned tickets, alphabetically."""
+    return [row["engineer"] for row in query_bigquery(_all_engineers_sql())]
+
+
 tickets_tool = FunctionTool(get_tickets_snapshot)
 pr_reviews_tool = FunctionTool(get_pr_reviews_snapshot)
 velocity_tool = FunctionTool(get_team_velocity_snapshot)

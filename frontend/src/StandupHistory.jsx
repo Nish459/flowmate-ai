@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { getStandupHistory } from "./api";
+import { useEffect, useState } from "react";
+import { getEngineers, getStandupHistory } from "./api";
 import FilterableTable from "./FilterableTable";
 import { flattenStandupDays, standupHistoryColumns } from "./panels";
 
@@ -14,6 +14,8 @@ function weekAgoIso() {
 }
 
 export default function StandupHistory() {
+  const [engineers, setEngineers] = useState(null);
+  const [engineersError, setEngineersError] = useState(null);
   const [engineer, setEngineer] = useState("");
   const [start, setStart] = useState(weekAgoIso());
   const [end, setEnd] = useState(todayIso());
@@ -21,13 +23,19 @@ export default function StandupHistory() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    getEngineers()
+      .then(setEngineers)
+      .catch((err) => setEngineersError(err.message));
+  }, []);
+
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!engineer.trim()) return;
+    if (!engineer) return;
     setLoading(true);
     setError(null);
     try {
-      const days = await getStandupHistory(engineer.trim(), start, end);
+      const days = await getStandupHistory(engineer, start, end);
       setRows(flattenStandupDays(days));
     } catch (err) {
       setError(err.message);
@@ -40,20 +48,29 @@ export default function StandupHistory() {
   return (
     <div>
       <form className="standup-form" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          placeholder="Engineer name"
+        <select
           value={engineer}
           onChange={(e) => setEngineer(e.target.value)}
           required
-        />
+          disabled={!engineers}
+        >
+          <option value="" disabled>
+            {engineers ? "Select engineer" : "Loading engineers..."}
+          </option>
+          {engineers?.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
         <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
         <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
-        <button type="submit" disabled={loading}>
+        <button type="submit" disabled={loading || !engineer}>
           {loading ? "Loading..." : "Browse"}
         </button>
       </form>
 
+      {engineersError && <p className="error-text">Could not load engineer list: {engineersError}</p>}
       {error && <p className="error-text">{error}</p>}
 
       {rows && rows.length === 0 && <p className="panel-meta">No standups found in that range.</p>}

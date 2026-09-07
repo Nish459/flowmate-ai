@@ -16,15 +16,20 @@ import StandupHistory from "./StandupHistory";
 import Tabs from "./Tabs";
 import "./App.css";
 
+// Only these 4 tabs need the (fairly heavy) combined /scan + /panels fetch --
+// Standup History has its own independent, on-demand data source.
+const DATA_TAB_KEYS = ["ticket_watcher", "bottleneck_detector", "review_nudger", "standup_writer"];
+
 function App() {
   const [scan, setScan] = useState(null);
   const [panels, setPanels] = useState(null);
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("ticket_watcher");
 
-  // Initial load reads the Firestore-cached /panels/latest (instant) rather
-  // than hitting BigQuery live -- falls back to a live refresh only the very
-  // first time nothing has been cached yet.
+  // Reads the Firestore-cached /panels/latest (instant) rather than hitting
+  // BigQuery live -- falls back to a live refresh only the very first time
+  // nothing has been cached yet.
   async function loadCached() {
     setLoading(true);
     setError(null);
@@ -62,9 +67,15 @@ function App() {
     }
   }
 
+  // Lazy load: only fetch once the user is actually looking at a tab that
+  // needs this data, not unconditionally on page load -- landing on (or
+  // switching straight to) Standup History never pays for it.
   useEffect(() => {
-    loadCached();
-  }, []);
+    if (DATA_TAB_KEYS.includes(activeTab) && panels === null && !loading) {
+      loadCached();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const tabs = [
     {
@@ -197,7 +208,7 @@ function App() {
         </p>
       )}
 
-      <Tabs tabs={tabs} />
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
     </div>
   );
 }

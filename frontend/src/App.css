@@ -414,10 +414,11 @@ td {
   margin-bottom: 18px;
 }
 
-.standup-form input[type="text"] {
+.standup-form select {
   border-radius: 999px;
   padding: 8px 16px;
   min-width: 180px;
+  background: var(--surface-2);
 }
 
 .standup-form button {

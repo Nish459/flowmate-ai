@@ -21,6 +21,10 @@ export function refreshPanels() {
   return getJson("/panels");
 }
 
+export function getEngineers() {
+  return getJson("/engineers");
+}
+
 export function getStandupHistory(engineer, start, end) {
   const params = new URLSearchParams();
   if (start) params.set("start", start);

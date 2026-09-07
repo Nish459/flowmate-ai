@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents.bottleneck_detector.agent import root_agent as bottleneck_detector  # noqa: E402
 from agents.common.agent_runner import run_agent_once  # noqa: E402
 from agents.common.bigquery_tool import (  # noqa: E402
+    get_all_engineers,
     get_flagged_ticket_counts,
     get_flagged_tickets_full,
     get_open_tickets_at_risk,
@@ -171,6 +172,15 @@ def latest_panels() -> dict:
     if cached is None:
         raise HTTPException(status_code=404, detail="No cached panel data yet -- GET /panels first.")
     return cached
+
+
+@app.get("/engineers")
+def engineers() -> list[str]:
+    """Distinct engineer names, for the Standup History dropdown. Deliberately
+    lightweight (one small BigQuery query) and independent of /panels -- this
+    tab shouldn't have to wait on the much heavier combined agent-data fetch
+    just to populate a dropdown."""
+    return get_all_engineers()
 
 
 @app.post("/standups/snapshot")

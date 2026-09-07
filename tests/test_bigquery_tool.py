@@ -371,3 +371,20 @@ def test_get_bug_close_rate_by_sprint_runs_the_trend_sql(monkeypatch):
 
     assert result == [{"sprint_id": "SPR-2026-07", "bug_close_rate": 0.38}]
     assert captured["sql"] == bigquery_tool._bug_close_rate_by_sprint_sql()
+
+
+def test_all_engineers_sql_excludes_unassigned_and_orders_alphabetically():
+    sql = bigquery_tool._all_engineers_sql()
+    assert "assigned_to IS NOT NULL" in sql
+    assert "ORDER BY engineer" in sql
+
+
+def test_get_all_engineers_returns_flat_sorted_list(monkeypatch):
+    def fake_query_bigquery(sql, params=None):
+        return [{"engineer": "Abigail Shaffer"}, {"engineer": "Angie Henderson"}]
+
+    monkeypatch.setattr(bigquery_tool, "query_bigquery", fake_query_bigquery)
+
+    result = bigquery_tool.get_all_engineers()
+
+    assert result == ["Abigail Shaffer", "Angie Henderson"]

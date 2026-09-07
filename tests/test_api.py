@@ -145,6 +145,15 @@ def test_generate_standup_snapshot_writes_each_engineer(monkeypatch):
     assert set(written.keys()) == {"Jane", "John"}
 
 
+def test_engineers_returns_the_bigquery_tool_result(monkeypatch):
+    monkeypatch.setattr(api_main, "get_all_engineers", lambda: ["Abigail Shaffer", "Angie Henderson"])
+
+    resp = client.get("/engineers")
+
+    assert resp.status_code == 200
+    assert resp.json() == ["Abigail Shaffer", "Angie Henderson"]
+
+
 def test_standup_history_defaults_to_last_seven_days(monkeypatch):
     captured = {}
 

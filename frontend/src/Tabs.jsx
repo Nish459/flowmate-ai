@@ -1,8 +1,14 @@
 import { useState } from "react";
 
-export default function Tabs({ tabs, defaultTab }) {
-  const [active, setActive] = useState(defaultTab ?? tabs[0].key);
+export default function Tabs({ tabs, defaultTab, active: controlledActive, onChange }) {
+  const [internalActive, setInternalActive] = useState(defaultTab ?? tabs[0].key);
+  const active = controlledActive ?? internalActive;
   const activeTab = tabs.find((t) => t.key === active) ?? tabs[0];
+
+  function selectTab(key) {
+    if (controlledActive === undefined) setInternalActive(key);
+    onChange?.(key);
+  }
 
   return (
     <div className="tabs">
@@ -14,7 +20,7 @@ export default function Tabs({ tabs, defaultTab }) {
             role="tab"
             aria-selected={tab.key === active}
             className={`tab-button ${tab.key === active ? "tab-active" : ""}`}
-            onClick={() => setActive(tab.key)}
+            onClick={() => selectTab(tab.key)}
           >
             {tab.label}
           </button>
