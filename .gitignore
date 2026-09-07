@@ -31,3 +31,7 @@ docs/how-it-works.md
 
 # ADK local runtime session state
 .adk/
+
+# Firebase CLI local cache and debug logs
+.firebase/
+firebase-debug.log
