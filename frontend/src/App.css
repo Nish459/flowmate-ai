@@ -432,6 +432,7 @@ td {
 
 .standup-form button:hover:not(:disabled) {
   filter: brightness(1.08);
+  color: #000;
 }
 
 .stat-strip {
