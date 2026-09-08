@@ -435,14 +435,14 @@ td {
 }
 
 .standup-form select {
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 8px 16px;
   min-width: 180px;
   background: var(--surface-2);
 }
 
 .standup-form button {
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: var(--accent-contrast);
   border: none;
@@ -485,7 +485,7 @@ td {
   margin-top: 8px;
   font-size: 12px;
   padding: 5px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
 
