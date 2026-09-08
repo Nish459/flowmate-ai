@@ -13,6 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from google.genai.errors import APIError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agents.bottleneck_detector.agent import root_agent as bottleneck_detector  # noqa: E402
@@ -236,9 +237,19 @@ async def generate_personal_standup(engineer: str, force: bool = False) -> dict:
         if cached:
             return cached
 
-    text = await run_agent_once(
-        personal_standup_agent, f"Generate the daily standup for {engineer}.", app_name="personal_standup"
-    )
+    try:
+        text = await run_agent_once(
+            personal_standup_agent, f"Generate the daily standup for {engineer}.", app_name="personal_standup"
+        )
+    except APIError as exc:
+        # Let this surface as a normal FastAPI-handled HTTPException rather than
+        # an unhandled exception -- an unhandled exception skips CORSMiddleware's
+        # header injection entirely (Starlette's ServerErrorMiddleware sends the
+        # 500 directly), which the browser then blocks as a CORS failure and
+        # surfaces to fetch() as an opaque "Failed to fetch" instead of this
+        # message. HTTPException is handled inside the CORS-covered layer, so
+        # the real error (e.g. the Gemini quota message) reaches the frontend.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     result = {"text": text, "generated_at": datetime.now(timezone.utc).isoformat()}
     write_personal_standup(engineer, today, result)
     return result

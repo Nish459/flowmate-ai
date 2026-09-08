@@ -326,3 +326,26 @@ def test_generate_personal_standup_force_bypasses_the_cache(monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json()["text"] == "fresh"
+
+
+def test_generate_personal_standup_surfaces_quota_errors_as_http_exception(monkeypatch):
+    """A raw, unhandled exception from run_agent_once would skip
+    CORSMiddleware's header injection (Starlette's ServerErrorMiddleware
+    sends the 500 directly) -- the browser then blocks that response as a
+    CORS failure and fetch() only ever sees an opaque "Failed to fetch",
+    never the real quota message. Raising HTTPException instead keeps the
+    response inside FastAPI's normal (CORS-covered) response path."""
+    from google.genai.errors import APIError
+
+    monkeypatch.setattr(api_main, "get_personal_standup", lambda engineer, today: None)
+
+    async def fake_run_agent_once(agent, prompt, app_name):
+        raise APIError(429, {"error": {"message": "quota exceeded"}})
+
+    monkeypatch.setattr(api_main, "run_agent_once", fake_run_agent_once)
+
+    resp = client.post("/standups/Jane/generate", headers={"Origin": "http://localhost:5173"})
+
+    assert resp.status_code == 503
+    assert "quota exceeded" in resp.json()["detail"]
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:5173"
