@@ -29,6 +29,9 @@ CLAUDE.md
 # Personal learning notes, not project deliverables
 docs/how-it-works.md
 
+# Demo recordings -- large binaries, not source
+demo/
+
 # ADK local runtime session state
 .adk/
 
