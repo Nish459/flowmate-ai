@@ -249,7 +249,7 @@ async def generate_personal_standup(engineer: str, force: bool = False) -> dict:
         # surfaces to fetch() as an opaque "Failed to fetch" instead of this
         # message. HTTPException is handled inside the CORS-covered layer, so
         # the real error (e.g. the Gemini quota message) reaches the frontend.
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=exc.message or str(exc)) from exc
     result = {"text": text, "generated_at": datetime.now(timezone.utc).isoformat()}
     write_personal_standup(engineer, today, result)
     return result
