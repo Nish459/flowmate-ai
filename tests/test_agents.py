@@ -18,6 +18,14 @@ def test_each_agent_module_exposes_a_root_agent_with_a_tool():
     assert len(bottleneck_detector.tools) == 4
 
 
+def test_bottleneck_finding_schema_has_ticket_id_and_miss_probability():
+    from agents.bottleneck_detector.agent import BottleneckFinding
+
+    fields = BottleneckFinding.model_fields
+    assert fields["ticket_id"].annotation is str
+    assert fields["miss_probability"].annotation is int
+
+
 def test_orchestrator_wires_fan_out_then_fan_in():
     from agents.orchestrator.agent import root_agent
 

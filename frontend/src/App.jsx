@@ -119,14 +119,23 @@ function App() {
     {
       key: "bottleneck_detector",
       label: "Bottleneck Detector",
-      render: () => (
+      render: () => {
+        const bottleneckFindings = parseFindings(scan?.agents?.bottleneck_detector);
+        const missProbabilityByTicket = Object.fromEntries(
+          (bottleneckFindings ?? []).map((f) => [f.ticket_id, f.miss_probability])
+        );
+        const bottleneckRows = panels?.bottleneck_detector.tickets.map((t) => ({
+          ...t,
+          miss_probability: missProbabilityByTicket[t.ticket_id],
+        }));
+        return (
         <AgentPanel
           agent={scan?.agents?.bottleneck_detector}
           stats={panels && bottleneckStats(panels.bottleneck_detector.tickets)}
-          findings={parseFindings(scan?.agents?.bottleneck_detector)}
+          findings={bottleneckFindings}
           table={
-            panels && {
-              rows: panels.bottleneck_detector.tickets,
+            bottleneckRows && {
+              rows: bottleneckRows,
               columns: bottleneckDetectorColumns(),
               filters: [
                 { key: "team", label: "Team" },
@@ -139,7 +148,8 @@ function App() {
             }
           }
         />
-      ),
+        );
+      },
     },
     {
       key: "review_nudger",

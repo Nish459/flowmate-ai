@@ -53,3 +53,9 @@ export function daysLeftPill(days) {
   const tone = days <= 0 ? "red" : days <= 2 ? "orange" : "gray";
   return <Pill tone={tone}>{days}d</Pill>;
 }
+
+export function missRiskPill(probability) {
+  if (probability === null || probability === undefined) return null;
+  const tone = probability >= 75 ? "red" : probability >= 50 ? "orange" : probability >= 25 ? "yellow" : "gray";
+  return <Pill tone={tone}>{probability}% miss risk</Pill>;
+}

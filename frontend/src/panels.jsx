@@ -1,4 +1,4 @@
-import { bucketPill, daysLeftPill, flagReasonPill, priorityPill, statePill } from "./Pill";
+import { bucketPill, daysLeftPill, flagReasonPill, missRiskPill, priorityPill, statePill } from "./Pill";
 
 function formatDate(value) {
   if (!value) return "";
@@ -44,6 +44,14 @@ export function bottleneckDetectorColumns() {
     { key: "state", label: "State", render: (r) => statePill(r.state) },
     { key: "tags", label: "Tags" },
     { key: "days_until_sprint_end", label: "Days left", render: (r) => daysLeftPill(r.days_until_sprint_end) },
+    {
+      key: "miss_probability",
+      label: "Miss risk",
+      // Only present for tickets Gemini actually cross-referenced and found a
+      // real signal for (see agents/bottleneck_detector/agent.py) -- blank
+      // for the rest, deliberately, rather than a manufactured number.
+      render: (r) => missRiskPill(r.miss_probability) ?? "—",
+    },
     { key: "reviewer", label: "Reviewer" },
   ];
 }

@@ -15,9 +15,15 @@ from config.settings import settings  # noqa: E402
 
 
 class BottleneckFinding(BaseModel):
+    ticket_id: str = Field(description="The exact ticket_id this finding is about, e.g. 'TFS-10634'.")
     title: str = Field(description="e.g. 'TFS-10634 -- High risk (0 days left)'.")
     body: str = Field(description="1-3 sentences naming the specific signal(s) that drove the risk call, with real numbers.")
     risk_level: str = Field(description="One of 'High', 'Medium', 'Low'.")
+    miss_probability: int = Field(
+        description="Your estimated probability (0-100) this ticket misses the sprint deadline, "
+        "calibrated to how many signals apply and how strong they are -- not just a restatement of "
+        "risk_level as a round number."
+    )
     teams: list[str] = Field(description="The team(s) this finding's ticket(s) belong to.")
     work_item_types: list[str] = Field(description="The work item type(s) involved, e.g. ['Bug'].")
     states: list[str] = Field(description="The ticket state(s) involved, e.g. ['Blocked'].")
@@ -61,13 +67,22 @@ root_agent = Agent(
         "Emit one finding per ticket that has at least one real signal from above -- "
         "leave tickets with none of these signals out entirely rather than flagging "
         "everything; a list that flags every ticket is worthless. Combine whichever "
-        "signals apply into a High/Medium/Low `risk_level`, and put the specific "
-        "signal(s) that drove it in the body, citing actual numbers (e.g. 'this "
-        "team+type combo has a 32% close rate vs 70%+ elsewhere') and "
-        "days_until_sprint_end. If nothing in the current sprint shows real risk "
-        "signal, return no findings rather than inventing one.\n\n"
-        "For every finding, list its ticket's team in `teams`, work_item_type in "
-        "`work_item_types`, and state in `states`."
+        "signals apply into a High/Medium/Low `risk_level` AND a numeric "
+        "`miss_probability` (0-100) -- the probability estimate is the whole point: "
+        "a manager can already see a ticket is overdue from days_until_sprint_end "
+        "alone, what they can't see is *how* likely it is to actually miss, which is "
+        "exactly what cross-referencing these signals is for. Calibrate it to how "
+        "many signals apply and how strong they are, not a lazy 90/60/30 restatement "
+        "of risk_level -- one weak signal (e.g. a middling close-rate gap) might be "
+        "~40-55%, one strong signal alone (e.g. a close rate under 20% vs 70%+ peers) "
+        "~60-75%, and multiple compounding strong signals (slow team+type pair AND a "
+        "slow reviewer AND 0 days left) should push into the 80-95% range. Put the "
+        "specific signal(s) that drove both numbers in the body, citing actual "
+        "numbers (e.g. 'this team+type combo has a 32% close rate vs 70%+ "
+        "elsewhere') and days_until_sprint_end. If nothing in the current sprint "
+        "shows real risk signal, return no findings rather than inventing one.\n\n"
+        "For every finding, set `ticket_id` to the exact ticket_id, list its team in "
+        "`teams`, work_item_type in `work_item_types`, and state in `states`."
     ),
     tools=[
         at_risk_tickets_tool,
