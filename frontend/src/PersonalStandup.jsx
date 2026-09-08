@@ -23,7 +23,8 @@ export default function PersonalStandup() {
     try {
       setResult(await generatePersonalStandup(engineer, force));
     } catch (err) {
-      setError(err.message);
+      console.error("generatePersonalStandup failed:", err);
+      setError("Failed to fetch");
     } finally {
       setLoading(false);
     }
