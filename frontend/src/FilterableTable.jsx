@@ -9,6 +9,11 @@ function uniqueValues(rows, key) {
   return Array.from(values).sort();
 }
 
+function capitalize(value) {
+  const s = String(value);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function compare(a, b) {
   if (a === null || a === undefined) return -1;
   if (b === null || b === undefined) return 1;
@@ -95,7 +100,7 @@ export default function FilterableTable({
             <option value="All">{f.label}: All</option>
             {f.options.map((opt) => (
               <option key={opt} value={opt}>
-                {opt}
+                {capitalize(opt)}
               </option>
             ))}
           </select>

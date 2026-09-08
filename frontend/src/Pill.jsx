@@ -54,6 +54,24 @@ export function daysLeftPill(days) {
   return <Pill tone={tone}>{days}d</Pill>;
 }
 
+export function tagsPill(tags) {
+  if (!tags) return null;
+  const items = String(tags)
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (items.length === 0) return null;
+  return (
+    <span className="tag-pill-group">
+      {items.map((tag) => (
+        <Pill key={tag} tone="gray">
+          {tag}
+        </Pill>
+      ))}
+    </span>
+  );
+}
+
 export function missRiskPill(probability) {
   if (probability === null || probability === undefined) return null;
   const tone = probability >= 75 ? "red" : probability >= 50 ? "orange" : probability >= 25 ? "yellow" : "gray";

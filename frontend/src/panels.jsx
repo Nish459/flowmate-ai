@@ -1,4 +1,4 @@
-import { bucketPill, daysLeftPill, flagReasonPill, missRiskPill, priorityPill, statePill } from "./Pill";
+import { bucketPill, daysLeftPill, flagReasonPill, missRiskPill, priorityPill, statePill, tagsPill } from "./Pill";
 
 function formatDate(value) {
   if (!value) return "";
@@ -42,7 +42,7 @@ export function bottleneckDetectorColumns() {
     { key: "team", label: "Team" },
     { key: "work_item_type", label: "Type" },
     { key: "state", label: "State", render: (r) => statePill(r.state) },
-    { key: "tags", label: "Tags" },
+    { key: "tags", label: "Tags", render: (r) => tagsPill(r.tags) ?? "—" },
     { key: "days_until_sprint_end", label: "Days left", render: (r) => daysLeftPill(r.days_until_sprint_end) },
     {
       key: "miss_probability",

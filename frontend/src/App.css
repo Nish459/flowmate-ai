@@ -501,7 +501,7 @@ td {
   flex-direction: column;
   gap: 2px;
   padding: 10px 16px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   border: 1px solid var(--border);
   min-width: 92px;
@@ -544,6 +544,12 @@ td {
 .pill-green { color: var(--ok); background: var(--ok-bg); }
 .pill-purple { color: var(--accent); background: var(--accent-soft); }
 .pill-gray { color: var(--text-dim); background: var(--surface-2); }
+
+.tag-pill-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 
 .skeleton {
   display: flex;
