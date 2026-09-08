@@ -29,8 +29,9 @@ CLAUDE.md
 # Personal learning notes, not project deliverables
 docs/how-it-works.md
 
-# Demo recordings -- large binaries, not source
-demo/
+# Demo recordings -- large binaries, not source (demo/scripts/ stays tracked)
+demo/*.webm
+demo/output/
 
 # ADK local runtime session state
 .adk/
