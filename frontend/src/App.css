@@ -474,6 +474,10 @@ td {
   margin-bottom: 0;
 }
 
+.personal-standup .error-text {
+  margin-top: 14px;
+}
+
 .personal-standup-result {
   margin-top: 14px;
   padding-top: 14px;
