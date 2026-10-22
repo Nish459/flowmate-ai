@@ -5,13 +5,14 @@ config/ only, never the reverse (see CLAUDE.md's module-boundary rule).
 
 from __future__ import annotations
 
+import hmac
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from google.genai.errors import APIError
 
@@ -69,6 +70,19 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def require_access_code(x_access_code: str = Header("")) -> None:
+    """Gate the endpoints that spend Gemini quota or overwrite the Firestore
+    cache. The API URL is public (it's baked into the frontend bundle), so
+    without this anyone could loop POST /scan and burn the quota. Read-only
+    cache endpoints stay open so the dashboard still renders for everyone.
+    """
+    expected = settings.access_code.get_secret_value()
+    if not expected:
+        return
+    if not hmac.compare_digest(x_access_code.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Access code required.")
+
+
 def _merge_scan_results(new_results: dict, previous: dict | None, generated_at: str) -> dict:
     """Build the cache document, preserving the last *successful* output for any
     agent that failed this run.
@@ -92,7 +106,7 @@ def _merge_scan_results(new_results: dict, previous: dict | None, generated_at: 
     return {"generated_at": generated_at, "agents": agents}
 
 
-@app.post("/scan")
+@app.post("/scan", dependencies=[Depends(require_access_code)])
 async def scan() -> dict:
     """Run all 4 agents sequentially, cache the result to Firestore, and return it.
 
@@ -138,7 +152,7 @@ def latest_scan() -> dict:
     return cached
 
 
-@app.get("/panels")
+@app.get("/panels", dependencies=[Depends(require_access_code)])
 def panels() -> dict:
     """Structured, LLM-free ticket/PR/standup data for the dashboard's
     filterable tables -- plain BigQuery reads (fast, no Gemini calls, no
@@ -195,7 +209,7 @@ def engineers() -> list[str]:
     return get_all_engineers()
 
 
-@app.post("/standups/snapshot")
+@app.post("/standups/snapshot", dependencies=[Depends(require_access_code)])
 def generate_standup_snapshot() -> dict:
     """Compute today's structured done/doing/blocked/next per engineer and
     cache each to Firestore. The "daily job" -- allowed to hardcode today's
@@ -218,7 +232,7 @@ def standup_history(engineer: str, start: str | None = None, end: str | None = N
     return get_standup_history(engineer, start, end)
 
 
-@app.post("/standups/{engineer}/generate")
+@app.post("/standups/{engineer}/generate", dependencies=[Depends(require_access_code)])
 async def generate_personal_standup(engineer: str, force: bool = False) -> dict:
     """On-demand, live-Gemini personal standup for one engineer -- distinct
     from both /standups/{engineer} (deterministic cached history) and the

@@ -7,7 +7,7 @@ os.environ directly, so there is a single source of truth for config.
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     gemini_model: str = Field("gemini-3.6-flash", alias="GEMINI_MODEL")
+
+    # Shared code the endpoints that spend Gemini quota or rewrite cached data
+    # require (X-Access-Code header). Empty disables the check, for local dev;
+    # the deployed Cloud Run service always sets it.
+    access_code: SecretStr = Field(SecretStr(""), alias="ACCESS_CODE")
 
     @property
     def bq_tickets_table_id(self) -> str:

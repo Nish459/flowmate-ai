@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from api import main as api_main
 
@@ -349,3 +350,43 @@ def test_generate_personal_standup_surfaces_quota_errors_as_http_exception(monke
     assert resp.status_code == 503
     assert "quota exceeded" in resp.json()["detail"]
     assert resp.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_gated_endpoints_reject_a_missing_or_wrong_access_code(monkeypatch):
+    monkeypatch.setattr(api_main.settings, "access_code", SecretStr("letmein"))
+
+    for method, path in [
+        ("post", "/scan"),
+        ("get", "/panels"),
+        ("post", "/standups/snapshot"),
+        ("post", "/standups/Angie%20Henderson/generate"),
+    ]:
+        assert getattr(client, method)(path).status_code == 401
+        assert getattr(client, method)(path, headers={"X-Access-Code": "nope"}).status_code == 401
+
+
+def test_gated_endpoint_accepts_the_right_access_code(monkeypatch):
+    monkeypatch.setattr(api_main.settings, "access_code", SecretStr("letmein"))
+    monkeypatch.setattr(api_main, "get_personal_standup", lambda engineer, day: {"text": "cached"})
+
+    resp = client.post("/standups/Angie%20Henderson/generate", headers={"X-Access-Code": "letmein"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"text": "cached"}
+
+
+def test_rejected_access_code_still_carries_cors_headers(monkeypatch):
+    monkeypatch.setattr(api_main.settings, "access_code", SecretStr("letmein"))
+    origin = api_main.settings.cors_allowed_origins_list[0]
+
+    resp = client.post("/scan", headers={"Origin": origin})
+
+    assert resp.status_code == 401
+    assert resp.headers["access-control-allow-origin"] == origin
+
+
+def test_read_only_cache_endpoints_stay_open_with_an_access_code_set(monkeypatch):
+    monkeypatch.setattr(api_main.settings, "access_code", SecretStr("letmein"))
+    monkeypatch.setattr(api_main, "get_latest_scan", lambda: {"agents": {}})
+
+    assert client.get("/scan/latest").status_code == 200

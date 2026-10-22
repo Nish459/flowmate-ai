@@ -24,7 +24,7 @@ export default function PersonalStandup() {
       setResult(await generatePersonalStandup(engineer, force));
     } catch (err) {
       console.error("generatePersonalStandup failed:", err);
-      setError("Failed to fetch");
+      setError(err.message.startsWith("401") ? "A valid access code is needed to generate a standup." : "Failed to fetch");
     } finally {
       setLoading(false);
     }
