@@ -50,6 +50,17 @@ Gemini free-tier's per-minute cap): `POST /scan` and `GET /panels` are the slow,
 refresh paths; `GET /scan/latest` and `GET /panels/latest` serve the Firestore-cached result instantly
 and are what the frontend actually reads on load.
 
+### Access code
+
+The endpoints that spend Gemini quota or rewrite cached data — `POST /scan`, `GET /panels`,
+`POST /standups/snapshot` and `POST /standups/{engineer}/generate` — require a shared access code
+in the `X-Access-Code` header and return `401` without it. Everything that only reads the cache stays
+open, so the dashboard loads for anyone. The first time a visitor clicks **Refresh** or **Generate
+My Standup**, the dashboard asks for the code and remembers it in that browser.
+
+The code comes from `ACCESS_CODE` (see `.env.example`). Locally it can be left empty, which turns
+the check off; the deployed service reads it from the Secret Manager secret `flowmate-access-code`.
+
 ## Tech stack
 
 | Layer | Technology |
@@ -93,7 +104,7 @@ deployed Cloud Run URL.
 ### Tests
 
 ```bash
-pytest -q   # ~120 tests, all monkeypatched/mocked, no live network calls, runs in under a second
+pytest -q   # ~140 tests, all monkeypatched/mocked, no live network calls, runs in under a second
 ```
 
 ## Synthetic dataset
@@ -123,11 +134,13 @@ rationale, and `scripts/synthetic/tickets.py` for the title templates.
 ## Deployment
 
 ```bash
-# Backend -> Cloud Run (Secret Manager holds the Gemini key; see CLAUDE.md for the one-time setup)
+# Backend -> Cloud Run (Secret Manager holds the Gemini key and the access code; see CLAUDE.md for
+# the one-time setup). --set-secrets replaces every secret, so keep ACCESS_CODE in the list:
+# without it the quota-spending endpoints run with no access code check.
 gcloud run deploy flowmate-api --source . --project=flowmate-ai-506118 --region=us-central1 \
   --allow-unauthenticated \
   --set-env-vars=GCP_PROJECT_ID=flowmate-ai-506118 \
-  --set-secrets=GOOGLE_API_KEY=gemini-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest
+  --set-secrets=GOOGLE_API_KEY=gemini-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,ACCESS_CODE=flowmate-access-code:latest
 
 # Frontend -> Firebase Hosting
 cd frontend && VITE_API_BASE_URL=<cloud-run-url> npm run build && cd ..
@@ -155,6 +168,7 @@ Dockerfile    backend container image for Cloud Run
 - The Gemini Developer API key used here is on the **free tier**: 20 requests/day for
   `gemini-3.6-flash`. `POST /scan` runs its 4 agents sequentially (not concurrently) specifically to
   stay under the per-minute cap; the dashboard itself never triggers a live scan, only reads the
-  cached result, so this doesn't affect normal use of the demo.
+  cached result, so this doesn't affect normal use of the demo. The access code above keeps anyone
+  else from spending that quota.
 - Standup Writer's Phase 2 (a conversational "what did I do last week?" endpoint) is a stretch goal,
   not built — the underlying query functions are already parameterized for it.
